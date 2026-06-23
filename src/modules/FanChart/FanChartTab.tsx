@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback, useId } from 'react';
 import * as d3 from 'd3';
 import { useApp } from '../../context/AppContext';
-import { Download, X, Maximize2, Minimize2, Plus, Minus, RotateCcw, Target } from 'lucide-react';
-import { HelpModal, HelpButton } from '../../components/HelpModal';
+import { Maximize2, Minimize2, Plus, Minus, Target } from 'lucide-react';
+import { ColorMode } from './FanChart';
 
 interface AncNode {
   id: string;
@@ -15,10 +15,8 @@ interface AncNode {
   sex: string;
   known: boolean;
   children?: AncNode[];
-  family_children_count?: number | null; // added for Obitelj mode
+  family_children_count?: number | null;
 }
-
-type ColorMode = 'generation' | 'obiteljska_grana' | 'drzava' | 'dob_zivota' | 'dob_roditelja' | 'obitelj';
 
 const FAMILY_CATEGORIES = [
   { id: 'only_child', label: 'Jedino dijete', color: '#4f46e5', match: (n: number | null | undefined) => n === 1 },
@@ -49,6 +47,15 @@ const getGenAgeColor = (age: number): string => {
   if (age <= 44) return '#f97316'; // orange
   if (age <= 49) return '#ef4444'; // red
   return '#be123c'; // deep red
+};
+
+const getPlaceLand = (place: string | null): string | null => {
+  if (!place) return null;
+  const parts = place.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts[parts.length - 2]; // second-to-last, e.g. "Vukovar-Srijem"
+  }
+  return parts[0] || null;
 };
 
 const getGenerationLabelCroatian = (gen: number, sex: string): string => {
@@ -91,16 +98,16 @@ const GEN_LABELS = [
 
 interface Props {
   mini?: boolean;
-  maxGenerations?: number;
-  isGenAgeMode?: boolean;
-  isFamilyMode?: boolean;
-  initialColorMode?: ColorMode;
+  maxGenerations: number;
+  colorMode: ColorMode;
+  isHalfFan?: boolean;
 }
 
-export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = false, isFamilyMode = false, initialColorMode = 'generation' }: Props) {
+export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'generation', isHalfFan = false }: Props) {
   const reactId = useId();
   const idPrefix = reactId.replace(/:/g, '-');
   const { tree, graph, selectedPersonId, setSelectedPerson } = useApp();
+  
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -108,8 +115,9 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [colorMode, setColorMode] = useState<ColorMode>(initialColorMode);
-  const [helpOpen, setHelpOpen] = useState(false);
+
+  const isGenAgeMode = colorMode === 'dob_roditelja';
+  const isFamilyMode = colorMode === 'obitelj';
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -146,23 +154,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     return () => document.removeEventListener('fullscreenchange', handleFSChange);
   }, []);
 
-  const [maxGen, setMaxGen] = useState(maxGenerations);
-
   const focalPerson = useMemo(() => {
     if (!tree || !selectedPersonId) return null;
     return tree.persons.get(selectedPersonId) || null;
   }, [tree, selectedPersonId]);
-
-  // Compute depths
-  const ancestorDepth = useMemo(() => {
-    if (!graph || !selectedPersonId) return 0;
-    return graph.getAncestorDepth(selectedPersonId);
-  }, [graph, selectedPersonId]);
-
-  const descendantDepth = useMemo(() => {
-    if (!graph || !selectedPersonId) return 0;
-    return graph.getDescendantDepth(selectedPersonId);
-  }, [graph, selectedPersonId]);
 
   // Build Ahnentafel tree data
   const rootData = useMemo(() => {
@@ -223,7 +218,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
         family_children_count,
       };
 
-      if (gen < maxGen) {
+      if (gen < maxGenerations) {
         const fatherId = p?._parents?.find(pid => tree.persons.get(pid)?.sex === 'M') || null;
         const motherId = p?._parents?.find(pid => tree.persons.get(pid)?.sex === 'F') || null;
         node.children = [
@@ -236,17 +231,21 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     };
 
     return buildNode(selectedPersonId, 0, 1);
-  }, [tree, selectedPersonId, maxGen]);
+  }, [tree, selectedPersonId, maxGenerations]);
 
-  const genAgeStats = useMemo(() => {
-    if (!rootData || !tree) return null;
-    
-    const nodesByAhn = new Map<number, AncNode>();
+  const nodesByAhn = useMemo(() => {
+    const map = new Map<number, AncNode>();
+    if (!rootData) return map;
     const traverse = (n: AncNode) => {
-      nodesByAhn.set(n.ahnentafel, n);
+      map.set(n.ahnentafel, n);
       n.children?.forEach(traverse);
     };
     traverse(rootData);
+    return map;
+  }, [rootData]);
+
+  const genAgeStats = useMemo(() => {
+    if (!rootData || !tree || nodesByAhn.size === 0) return null;
     
     const fathersAges: { age: number; name: string }[] = [];
     const mothersAges: { age: number; name: string }[] = [];
@@ -293,17 +292,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       oldestName: oldest.name,
       knownCount: allAges.length
     };
-  }, [rootData, tree]);
+  }, [rootData, tree, nodesByAhn]);
 
   const genAgeLegendCounts = useMemo(() => {
-    if (!rootData || !tree) return null;
-    
-    const nodesByAhn = new Map<number, AncNode>();
-    const traverse = (n: AncNode) => {
-      nodesByAhn.set(n.ahnentafel, n);
-      n.children?.forEach(traverse);
-    };
-    traverse(rootData);
+    if (!rootData || !tree || nodesByAhn.size === 0) return null;
     
     const counts = {
       '20-24': 0,
@@ -337,17 +329,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     });
     
     return counts;
-  }, [rootData, tree]);
+  }, [rootData, tree, nodesByAhn]);
 
   const familyStats = useMemo(() => {
-    if (!rootData || !tree) return null;
-
-    const nodesByAhn = new Map<number, AncNode>();
-    const traverse = (n: AncNode) => {
-      nodesByAhn.set(n.ahnentafel, n);
-      n.children?.forEach(traverse);
-    };
-    traverse(rootData);
+    if (!rootData || !tree || nodesByAhn.size === 0) return null;
 
     const counts: { count: number; name: string }[] = [];
 
@@ -374,17 +359,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       largestName: largest.name,
       knownCount: counts.length,
     };
-  }, [rootData, tree]);
+  }, [rootData, tree, nodesByAhn]);
 
   const familyLegendCounts = useMemo(() => {
-    if (!rootData || !tree) return null;
-
-    const nodesByAhn = new Map<number, AncNode>();
-    const traverse = (n: AncNode) => {
-      nodesByAhn.set(n.ahnentafel, n);
-      n.children?.forEach(traverse);
-    };
-    traverse(rootData);
+    if (!rootData || !tree || nodesByAhn.size === 0) return null;
 
     const counts = {
       only_child: 0,
@@ -423,11 +401,59 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     return counts;
   }, [rootData, tree]);
 
+  const countryLegendStats = useMemo(() => {
+    if (!rootData || !tree) return null;
+    const counts = new Map<string, number>();
+    let unknownCount = 0;
+    
+    const traverse = (n: AncNode) => {
+      if (n.known) {
+        if (n.birth_place) {
+          const country = n.birth_place.split(',').pop()?.trim() || 'Nepoznato';
+          counts.set(country, (counts.get(country) || 0) + 1);
+        } else {
+          unknownCount++;
+        }
+      }
+      n.children?.forEach(traverse);
+    };
+    traverse(rootData);
+    
+    return {
+      list: Array.from(counts.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count),
+      unknownCount
+    };
+  }, [rootData, tree]);
+
+  const landsLegendStats = useMemo(() => {
+    if (!rootData || !tree) return null;
+    const counts = new Map<string, number>();
+    let unknownCount = 0;
+    
+    const traverse = (n: AncNode) => {
+      if (n.known) {
+        const land = getPlaceLand(n.birth_place);
+        if (land) {
+          counts.set(land, (counts.get(land) || 0) + 1);
+        } else {
+          unknownCount++;
+        }
+      }
+      n.children?.forEach(traverse);
+    };
+    traverse(rootData);
+    
+    return {
+      list: Array.from(counts.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count),
+      unknownCount
+    };
+  }, [rootData, tree]);
+
   // Legend stats
   const legendStats = useMemo(() => {
     if (!rootData) return [];
     const stats: { label: string; known: number; total: number }[] = [];
-    for (let g = 0; g <= maxGen; g++) {
+    for (let g = 0; g <= maxGenerations; g++) {
       const total = Math.pow(2, g);
       const known = g === 0 ? 1 : 0;
       stats.push({ label: GEN_LABELS[g] || `${g}× Pradjedovi`, known, total });
@@ -440,7 +466,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     };
     rootData.children?.forEach(countKnown);
     return stats;
-  }, [rootData, maxGen]);
+  }, [rootData, maxGenerations]);
 
   // Color logic
   const getColor = useCallback((node: AncNode, cm: ColorMode): string => {
@@ -448,20 +474,14 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     switch (cm) {
       case 'generation':
         return GENERATION_COLORS[node.generation] ?? GENERATION_COLORS[GENERATION_COLORS.length - 1];
-      case 'obiteljska_grana': {
-        if (node.ahnentafel <= 1) return GENERATION_COLORS[0];
-        let a = node.ahnentafel;
-        while (a > 7) a = Math.floor(a / 2);
-        return QUADRANT_COLORS[a - 4] ?? '#94a3b8';
-      }
       case 'drzava':
-        if (!node.birth_place) return '#94a3b8';
+        if (!node.birth_place) return '#cbd5e1';
         return d3.scaleOrdinal(d3.schemeSet2)(node.birth_place.split(',').pop()?.trim() || '');
-      case 'dob_zivota':
-        if (node.birth_year && node.death_year) {
-          return d3.scaleSequential(d3.interpolateYlGnBu).domain([0, 90])(node.death_year - node.birth_year);
-        }
-        return '#cbd5e1';
+      case 'lands': {
+        const land = getPlaceLand(node.birth_place);
+        if (!land) return '#cbd5e1';
+        return d3.scaleOrdinal(d3.schemeSet3)(land);
+      }
       case 'dob_roditelja':
         return '#cbd5e1'; // fallback handled locally
       case 'obitelj': {
@@ -494,31 +514,28 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     return false;
   }, []);
 
-  const highlightCategory = useCallback((catId: string) => {
+  const highlightGroup = useCallback((filterFn: (node: AncNode) => boolean) => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
     svg.selectAll('.node-arc')
       .transition().duration(120)
       .style('opacity', (d: any) => {
         if (!d || !d.node) return 0.20;
-        const matches = checkCategoryMatch(d.node, catId);
-        return matches ? 1 : 0.20;
+        return filterFn(d.node) ? 1 : 0.20;
       });
     svg.selectAll('.node-text-container')
       .transition().duration(120)
       .style('opacity', (d: any) => {
         if (!d || !d.node) return 0.20;
-        const matches = checkCategoryMatch(d.node, catId);
-        return matches ? 1 : 0.20;
+        return filterFn(d.node) ? 1 : 0.20;
       });
     svg.selectAll('.node-pill-group')
       .transition().duration(120)
       .style('opacity', (d: any) => {
         if (!d || !d.node) return 0.20;
-        const matches = checkCategoryMatch(d.node, catId);
-        return matches ? 1 : 0.20;
+        return filterFn(d.node) ? 1 : 0.20;
       });
-  }, [checkCategoryMatch]);
+  }, []);
 
   const resetHighlight = useCallback(() => {
     if (!svgRef.current) return;
@@ -553,12 +570,6 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     if (!svgRef.current || !containerRef.current || !rootData) return;
 
     const renderId = Math.random().toString(36).substring(2, 9);
-    const nodesByAhn = new Map<number, AncNode>();
-    const traverseNodes = (n: AncNode) => {
-      nodesByAhn.set(n.ahnentafel, n);
-      n.children?.forEach(traverseNodes);
-    };
-    traverseNodes(rootData);
 
     const getLineAhnentafels = (ahn: number): Set<number> => {
       const line = new Set<number>();
@@ -630,27 +641,26 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     svg.call(zoom as any);
     zoomRef.current = zoom;
 
+    // Shift center down for Half Fan to utilize full height
     const cx = W / 2;
-    const cy = H / 2;
+    const cy = isHalfFan ? H - 35 : H / 2;
 
-    // Sizing adjustments:
-    // 1. Center circle size (outerR0) is proportional (about 18% of maxRadius, min 55px)
-    // 2. Padding reduced to 25px to maximize ring widths
-    const maxRadius = Math.min(W, H) / 2 - 25;
+    const maxRadius = isHalfFan 
+      ? Math.min(W / 2 - 25, H - 50)
+      : Math.min(W, H) / 2 - 25;
+
     const outerR0 = Math.max(55, maxRadius * 0.18); 
-    const bandWidth = (maxRadius - outerR0) / maxGen; // Thicker rings that span to the outer limit
+    const bandWidth = (maxRadius - outerR0) / maxGenerations; 
 
     const outerR = (gen: number) => gen === 0 ? outerR0 : outerR0 + gen * bandWidth;
     const innerR = (gen: number) => gen === 0 ? 0 : outerR0 + (gen - 1) * bandWidth;
 
-    // Arc generator (no pad angle to avoid broken arcs, stroke-width handles segment separation)
     const arcGen = d3.arc<{ node: AncNode; a0: number; a1: number; ir: number; or: number }>()
       .innerRadius(d => d.ir)
       .outerRadius(d => d.or)
       .startAngle(d => d.a0)
       .endAngle(d => d.a1);
 
-    // Collect all nodes
     const allNodes: AncNode[] = [];
     const traverse = (n: AncNode) => {
       allNodes.push(n);
@@ -658,63 +668,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     };
     traverse(rootData);
 
-    // Translate to center
     g.attr('transform', `translate(${cx},${cy})`);
     svg.call(zoom.transform as any, d3.zoomIdentity.translate(cx, cy));
 
     const mainG = g;
-
-    // Draw focal person circle (Gen 0)
-    const focalArcData = { node: rootData, a0: 0, a1: 2 * Math.PI, ir: 0, or: outerR0 };
-    mainG.append('circle')
-      .datum(focalArcData)
-      .attr('class', 'node-arc node-arc-1')
-      .attr('r', outerR0)
-      .attr('fill', getColor(rootData, colorMode))
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 3.0) // Premium border
-      .style('cursor', 'default')
-      .on('mouseover', (event) => { showTip(event, rootData); })
-      .on('mousemove', (event) => { showTip(event, rootData); })
-      .on('mouseout', () => { hideTip(); });
-
-    // Focal person text
-    const focalText = mainG.append('text')
-      .datum(focalArcData)
-      .attr('class', 'node-text-container')
-      .attr('text-anchor', 'middle')
-      .style('fill', '#fff')
-      .style('pointer-events', 'none');
-
-    const nameParts = rootData.name.split(' ');
-    const focalFontSize = Math.max(10, outerR0 * 0.21); // Size suited for central circle
-    const yearFontSize = Math.max(8, outerR0 * 0.16);
-
-    if (nameParts.length > 1) {
-      focalText.append('tspan').attr('x', 0).attr('dy', '-0.55em')
-        .text(nameParts.slice(0, -1).join(' '))
-        .style('font-size', `${focalFontSize}px`)
-        .style('font-weight', '800');
-      focalText.append('tspan').attr('x', 0).attr('dy', '1.15em')
-        .text(nameParts[nameParts.length - 1])
-        .style('font-size', `${focalFontSize}px`)
-        .style('font-weight', '800');
-    } else {
-      focalText.append('tspan').attr('x', 0).attr('dy', '0.25em')
-        .text(rootData.name)
-        .style('font-size', `${focalFontSize}px`)
-        .style('font-weight', '800');
-    }
-    if (rootData.birth_year) {
-      const yearStr = rootData.death_year 
-        ? `${rootData.birth_year}–${rootData.death_year}` 
-        : `r. ${rootData.birth_year}`;
-      focalText.append('tspan').attr('x', 0).attr('dy', '1.3em')
-        .text(yearStr)
-        .style('font-size', `${yearFontSize}px`)
-        .style('font-weight', '500')
-        .style('opacity', '0.9');
-    }
 
     // Tooltip helper
     const tooltip = d3.select(tooltipRef.current);
@@ -829,6 +786,13 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
           }
         }
 
+        let placeStr = '';
+        if (colorMode === 'drzava' && node.birth_place) {
+          placeStr = `<div class="text-xs text-slate-600 mt-0.5">🌍 <strong>Država rođenja:</strong> ${node.birth_place.split(',').pop()?.trim()}</div>`;
+        } else if (colorMode === 'lands' && node.birth_place) {
+          placeStr = `<div class="text-xs text-slate-600 mt-0.5">🏔️ <strong>Regija/Kraj:</strong> ${getPlaceLand(node.birth_place)}</div>`;
+        }
+
         tooltip.style('display', 'block').html(`
           <div class="font-bold text-slate-800 text-sm mb-1 flex items-center gap-1.5 border-b border-slate-100 pb-1">
             <span class="w-2.5 h-2.5 rounded-full shrink-0 ${node.sex === 'M' ? 'bg-blue-500' : node.sex === 'F' ? 'bg-pink-500' : 'bg-slate-400'}"></span>
@@ -837,6 +801,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
           ${birthStr}
           ${deathStr}
           ${ageStr}
+          ${placeStr}
           <div class="text-[10px] text-teal-600 mt-2 border-t border-slate-100 pt-1.5 font-semibold flex items-center gap-1">
             🖱️ Kliknite za novi fokus
           </div>
@@ -844,6 +809,82 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       }
     };
     const hideTip = () => tooltip.style('display', 'none');
+
+    // Draw focal person (Gen 0)
+    if (isHalfFan) {
+      const focalArcData = { node: rootData, a0: -Math.PI / 2, a1: Math.PI / 2, ir: 0, or: outerR0 };
+      const focalPath = arcGen(focalArcData)!;
+      
+      mainG.append('path')
+        .datum(focalArcData)
+        .attr('class', 'node-arc node-arc-1')
+        .attr('d', focalPath)
+        .attr('fill', getSegmentColor(rootData))
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 3.0)
+        .style('cursor', 'default')
+        .on('mouseover', (event) => { showTip(event, rootData); })
+        .on('mousemove', (event) => { showTip(event, rootData); })
+        .on('mouseout', () => { hideTip(); });
+    } else {
+      const focalArcData = { node: rootData, a0: 0, a1: 2 * Math.PI, ir: 0, or: outerR0 };
+      mainG.append('circle')
+        .datum(focalArcData)
+        .attr('class', 'node-arc node-arc-1')
+        .attr('r', outerR0)
+        .attr('fill', getSegmentColor(rootData))
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 3.0)
+        .style('cursor', 'default')
+        .on('mouseover', (event) => { showTip(event, rootData); })
+        .on('mousemove', (event) => { showTip(event, rootData); })
+        .on('mouseout', () => { hideTip(); });
+    }
+
+    // Focal person text
+    const focalArcData = isHalfFan 
+      ? { node: rootData, a0: -Math.PI / 2, a1: Math.PI / 2, ir: 0, or: outerR0 }
+      : { node: rootData, a0: 0, a1: 2 * Math.PI, ir: 0, or: outerR0 };
+
+    const focalText = mainG.append('text')
+      .datum(focalArcData)
+      .attr('class', 'node-text-container')
+      .attr('text-anchor', 'middle')
+      .style('fill', '#fff')
+      .style('pointer-events', 'none');
+
+    const nameParts = rootData.name.split(' ');
+    const focalFontSize = Math.max(10, outerR0 * 0.21); 
+    const yearFontSize = Math.max(8, outerR0 * 0.16);
+
+    // Shift text slightly up for Half Fan since the bottom of the circle is flat
+    const textDyOffset = isHalfFan ? -12 : 0;
+
+    if (nameParts.length > 1) {
+      focalText.append('tspan').attr('x', 0).attr('dy', `${-0.55 + textDyOffset/16}em`)
+        .text(nameParts.slice(0, -1).join(' '))
+        .style('font-size', `${focalFontSize}px`)
+        .style('font-weight', '800');
+      focalText.append('tspan').attr('x', 0).attr('dy', '1.15em')
+        .text(nameParts[nameParts.length - 1])
+        .style('font-size', `${focalFontSize}px`)
+        .style('font-weight', '800');
+    } else {
+      focalText.append('tspan').attr('x', 0).attr('dy', `${0.25 + textDyOffset/16}em`)
+        .text(rootData.name)
+        .style('font-size', `${focalFontSize}px`)
+        .style('font-weight', '800');
+    }
+    if (rootData.birth_year) {
+      const yearStr = rootData.death_year 
+        ? `${rootData.birth_year}–${rootData.death_year}` 
+        : `r. ${rootData.birth_year}`;
+      focalText.append('tspan').attr('x', 0).attr('dy', '1.3em')
+        .text(yearStr)
+        .style('font-size', `${yearFontSize}px`)
+        .style('font-weight', '500')
+        .style('opacity', '0.9');
+    }
 
     // Filter out focal person and draw ancestor arcs
     const genNodes = allNodes.filter(n => n.generation >= 1);
@@ -856,18 +897,33 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       while (parentAhn > 3) parentAhn = Math.floor(parentAhn / 2);
       const isFatherSide = parentAhn === 2;
 
-      const theta = Math.PI / Math.pow(2, g - 1);
       let startAngle = 0;
       let endAngle = 0;
 
-      if (isFatherSide) {
-        const idx = node.ahnentafel - Math.pow(2, g);
-        startAngle = 2 * Math.PI - (idx + 1) * theta;
-        endAngle = 2 * Math.PI - idx * theta;
+      if (isHalfFan) {
+        // 180° Top Semi-circle angles from -PI/2 to PI/2
+        const theta = Math.PI / Math.pow(2, g);
+        if (isFatherSide) {
+          const idx = node.ahnentafel - Math.pow(2, g);
+          startAngle = -Math.PI / 2 + idx * theta;
+          endAngle = startAngle + theta;
+        } else {
+          const idx = node.ahnentafel - 3 * Math.pow(2, g - 1);
+          startAngle = idx * theta;
+          endAngle = startAngle + theta;
+        }
       } else {
-        const idx = node.ahnentafel - 3 * Math.pow(2, g - 1);
-        startAngle = idx * theta;
-        endAngle = (idx + 1) * theta;
+        // 360° full circle angles
+        const theta = Math.PI / Math.pow(2, g - 1);
+        if (isFatherSide) {
+          const idx = node.ahnentafel - Math.pow(2, g);
+          startAngle = 2 * Math.PI - (idx + 1) * theta;
+          endAngle = 2 * Math.PI - idx * theta;
+        } else {
+          const idx = node.ahnentafel - 3 * Math.pow(2, g - 1);
+          startAngle = idx * theta;
+          endAngle = (idx + 1) * theta;
+        }
       }
 
       const ir = innerR(g);
@@ -875,7 +931,6 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       
       const arcData = { node, a0: startAngle, a1: endAngle, ir, or };
       const path = arcGen(arcData)!;
-
       const color = getSegmentColor(node);
       
       // Append arc segment
@@ -885,7 +940,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
         .attr('d', path)
         .attr('fill', color)
         .attr('stroke', '#fff')
-        .attr('stroke-width', 2.0) // Solid crisp grids
+        .attr('stroke-width', 2.0)
         .style('cursor', node.known ? 'pointer' : 'default')
         .style('opacity', node.known ? 1 : 0.65)
         .on('mouseover', function(event) {
@@ -905,6 +960,18 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
               mainG.selectAll('.node-pill-group')
                 .transition().duration(120)
                 .style('opacity', (d: any) => d && lineAhns.has(d.node.ahnentafel) ? 1 : 0.20);
+            } else {
+              // Dim other branches to 80%
+              const lineAhns = getLineAhnentafels(node.ahnentafel);
+              mainG.selectAll('.node-arc')
+                .transition().duration(120)
+                .style('opacity', (d: any) => d && lineAhns.has(d.node.ahnentafel) ? 1 : 0.20);
+              mainG.selectAll('.node-text-container')
+                .transition().duration(120)
+                .style('opacity', (d: any) => d && lineAhns.has(d.node.ahnentafel) ? 1 : 0.20);
+              mainG.selectAll('.node-pill-group')
+                .transition().duration(120)
+                .style('opacity', (d: any) => d && lineAhns.has(d.node.ahnentafel) ? 1 : 0.20);
             }
           }
         })
@@ -913,18 +980,16 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
           d3.select(this).attr('stroke', '#fff').attr('stroke-width', 2.0);
           hideTip();
           
-          // GenAge Reset Highlight
-          if (colorMode === 'dob_roditelja') {
-            mainG.selectAll('.node-arc')
-              .transition().duration(120)
-              .style('opacity', (d: any) => d && d.node.known ? 1 : 0.65);
-            mainG.selectAll('.node-text-container')
-              .transition().duration(120)
-              .style('opacity', 1);
-            mainG.selectAll('.node-pill-group')
-              .transition().duration(120)
-              .style('opacity', 1);
-          }
+          // Reset highlights
+          mainG.selectAll('.node-arc')
+            .transition().duration(120)
+            .style('opacity', (d: any) => d && d.node.known ? 1 : 0.65);
+          mainG.selectAll('.node-text-container')
+            .transition().duration(120)
+            .style('opacity', 1);
+          mainG.selectAll('.node-pill-group')
+            .transition().duration(120)
+            .style('opacity', 1);
         })
         .on('click', () => {
           if (node.known && node.id && !node.id.startsWith('unk-')) {
@@ -938,22 +1003,19 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       const angleSpan = endAngle - startAngle;
       const midAngle = (startAngle + endAngle) / 2;
       const midR = (ir + or) / 2;
-
-      // Chord length at midR
       const chordLen = angleSpan * midR;
 
       // Scale font sizes based on space
       const maxFontSize = Math.min(bandWidth * 0.25, chordLen * 0.11, 10.5);
       const fontSize = Math.max(6.5, maxFontSize);
 
-      // Hide text if segment is too narrow
       if (chordLen < 22) return;
 
       const flipText = midAngle > Math.PI / 2 && midAngle < 1.5 * Math.PI;
 
-      // Format name (truncate if too long for chord length, try "Given S." first)
+      // Format name (truncate if too long)
       const maxChars = Math.floor(chordLen / (fontSize * 0.58));
-      if (maxChars < 3) return; // Space is way too small, hide completely
+      if (maxChars < 3) return; 
 
       let displayName = node.name;
       if (node.name.length > maxChars) {
@@ -993,7 +1055,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
           }
           if (birthStr.length <= limit) return birthStr;
         } else {
-          const onlyBirth = `${birth}`; // using simple year without "b. " to save space in narrow arcs
+          const onlyBirth = `${birth}`;
           if (onlyBirth.length <= limit) return onlyBirth;
         }
         return '';
@@ -1004,7 +1066,6 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
 
       let nameArcR = midR;
       if (showTwoLines) {
-        // Shift name line vertically (outward for top half, inward for bottom half)
         nameArcR = flipText ? midR - fontSize * 0.65 : midR + fontSize * 0.65;
       }
 
@@ -1020,10 +1081,8 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
         .attr('id', textArcId)
         .attr('d', namePathStr);
 
-      // Check background color light/dark for text readability
-      const textFill = (color === '#cbd5e1' || color === '#f1f5f9' || color === '#e2e8f0') ? '#334155' : '#fff';
+      const textFill = (color === '#cbd5e1' || color === '#f1f5f9' || color === '#e2e8f0' || color === '#fff') ? '#334155' : '#fff';
 
-      // Render Name (centered on name baseline)
       mainG.append('text')
         .datum(arcData)
         .attr('class', 'node-text-container')
@@ -1038,7 +1097,6 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
         .style('pointer-events', 'none')
         .attr('dominant-baseline', 'central');
 
-      // Render Years on a separate line below the name
       if (showTwoLines) {
         const yearArcR = flipText ? midR + fontSize * 0.65 : midR - fontSize * 0.65;
         let yearPathStr = flipText
@@ -1065,7 +1123,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       }
 
       // Append pill to the outermost ring in dob_roditelja mode
-      if (colorMode === 'dob_roditelja' && node.generation === maxGen) {
+      if (colorMode === 'dob_roditelja' && node.generation === maxGenerations) {
         const lineAges = getLineAgesInfo(node.ahnentafel);
         if (lineAges.length > 0) {
           const avg = Math.round(d3.mean(lineAges) || 0);
@@ -1099,7 +1157,6 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
             .style('fill', '#fff')
             .style('pointer-events', 'none');
 
-          // Attach mouse events to trigger highlight of the line
           pillGroup
             .on('mouseover', function(event) {
               const arcPath = mainG.select(`.node-arc-${node.ahnentafel}`);
@@ -1144,22 +1201,26 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       }
     });
 
-    // Add Side labels ("Očeva strana" / "Majčina strana")
-    const labelRadius = outerR(maxGen) + 15;
+    // Add Side labels
+    const labelRadius = outerR(maxGenerations) + 15;
+    
+    // Symmetrical positioning depending on half-fan vs full circle
+    const labelY = isHalfFan ? -12 : 0;
+    
     mainG.append('text')
       .attr('x', -labelRadius)
-      .attr('y', 0)
+      .attr('y', labelY)
       .attr('text-anchor', 'end')
       .attr('dominant-baseline', 'middle')
       .style('font-size', '11px')
       .style('font-weight', '800')
-      .style('fill', '#64748b') // slate-500
+      .style('fill', '#64748b') 
       .style('letter-spacing', '0.05em')
       .text('← OČEVA STRANA');
 
     mainG.append('text')
       .attr('x', labelRadius)
-      .attr('y', 0)
+      .attr('y', labelY)
       .attr('text-anchor', 'start')
       .attr('dominant-baseline', 'middle')
       .style('font-size', '11px')
@@ -1168,7 +1229,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
       .style('letter-spacing', '0.05em')
       .text('MAJČINA STRANA →');
 
-  }, [rootData, colorMode, setSelectedPerson, maxGen, idPrefix, dimensions.width, dimensions.height]);
+  }, [rootData, colorMode, setSelectedPerson, maxGenerations, idPrefix, dimensions.width, dimensions.height, isHalfFan, nodesByAhn]);
 
   // Zoom helpers
   const doZoom = (type: 'in' | 'out' | 'reset') => {
@@ -1178,7 +1239,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     const H = dimensions.height;
     if (type === 'in') svg.transition().duration(300).call(zoomRef.current.scaleBy as any, 1.35);
     else if (type === 'out') svg.transition().duration(300).call(zoomRef.current.scaleBy as any, 0.75);
-    else svg.transition().duration(400).call(zoomRef.current.transform as any, d3.zoomIdentity.translate(W / 2, H / 2));
+    else {
+      const cy = isHalfFan ? H - 35 : H / 2;
+      svg.transition().duration(400).call(zoomRef.current.transform as any, d3.zoomIdentity.translate(W / 2, cy));
+    }
   };
 
   if (!tree) return null;
@@ -1192,366 +1256,306 @@ export default function FanChartTab({ mini, maxGenerations = 4, isGenAgeMode = f
     );
   }
 
-  const genOptions = [3, 4, 5, 6, 7];
-
   return (
-    <div className="flex flex-col h-full w-full bg-[#f8fafc] overflow-hidden">
+    <div className="flex-1 flex gap-3 px-3 pb-3 overflow-hidden min-h-0">
 
       {/* Tooltip */}
       <div ref={tooltipRef} className="fixed z-50 bg-white border border-slate-200 shadow-xl rounded-xl p-3 pointer-events-none hidden text-sm" style={{ maxWidth: '240px' }} />
 
-      {/* ─── Header Panel ─── */}
-      <div className="p-3 shrink-0">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center gap-4">
-
-          {/* Focal person details */}
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-2xl border-2 shadow-inner shrink-0
-              ${focalPerson?.sex === 'M' ? 'bg-blue-50 border-blue-200 text-blue-500'
-              : focalPerson?.sex === 'F' ? 'bg-pink-50 border-pink-200 text-pink-500'
-              : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
-              {focalPerson?.sex === 'M' ? '♂' : focalPerson?.sex === 'F' ? '♀' : '?'}
-            </div>
-            <div className="min-w-0">
-              <div className="font-extrabold text-lg text-teal-700 leading-tight truncate">
-                {focalPerson?.names[0]?.full || 'Nepoznato'}
+      {/* SVG Canvas wrapper */}
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        {isGenAgeMode && genAgeStats && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 mb-3 shrink-0 print:hidden">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-black text-emerald-600">{genAgeStats.avgTotal}</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Prosječna starost roditelja pri rođenju</span>
               </div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
-                <span>{focalPerson?.birth?.date?.year ? `Rođen/a ${focalPerson.birth.date.year}` : 'Nepoznata godina'}</span>
+              <div className="hidden sm:block h-6 w-px bg-slate-200" />
+              <div className="flex items-center gap-3 text-xs">
+                <span className="font-semibold text-slate-600 flex items-center gap-1">
+                  <span className="text-blue-500">♂</span> {genAgeStats.avgFathers} očevi
+                </span>
                 <span className="text-slate-300">|</span>
-                <span>gore (predci): <strong>{ancestorDepth} gen.</strong></span>
-                <span className="text-slate-300">/</span>
-                <span>dolje (potomci): <strong>{descendantDepth} gen.</strong></span>
+                <span className="font-semibold text-slate-600 flex items-center gap-1">
+                  <span className="text-pink-500">♀</span> {genAgeStats.avgMothers} majke
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+              <div>
+                Najmlađi: <strong className="text-slate-700">{genAgeStats.youngestAge} god.</strong> <span className="text-slate-400">({genAgeStats.youngestName})</span>
+              </div>
+              <span className="text-slate-300">•</span>
+              <div>
+                Najstariji: <strong className="text-slate-700">{genAgeStats.oldestAge} god.</strong> <span className="text-slate-400">({genAgeStats.oldestName})</span>
+              </div>
+              <span className="text-slate-300">•</span>
+              <div className="font-semibold text-teal-600 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-100">
+                {genAgeStats.knownCount} parova
               </div>
             </div>
           </div>
+        )}
 
-          <div className="flex-1" />
-
-          {/* Generations picker */}
-          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 gap-0.5">
-            {genOptions.map(g => (
-              <button key={g} onClick={() => setMaxGen(g)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                  maxGen === g
-                    ? 'bg-white text-teal-600 shadow border border-teal-100'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'}`}>
-                {g}G
-              </button>
-            ))}
-          </div>
-
-          {/* Color modes */}
-          {!isGenAgeMode && !isFamilyMode && (
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 gap-0.5">
-              {([
-                { id: 'generation',       label: 'Generacija' },
-                { id: 'dob_zivota',       label: 'Životni vijek' },
-                { id: 'obiteljska_grana', label: 'Grana' },
-                { id: 'drzava',           label: 'Zemlja' },
-              ] as { id: ColorMode; label: string }[]).map(c => (
-                <button key={c.id} onClick={() => setColorMode(c.id)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                    colorMode === c.id
-                      ? 'bg-white text-teal-600 shadow border border-teal-100'
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'}`}>
-                  {c.label}
-                </button>
-              ))}
+        {isFamilyMode && familyStats && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 mb-3 shrink-0 print:hidden">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-black text-indigo-600">{familyStats.avgTotal}</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Prosječan broj djece po obitelji</span>
+              </div>
             </div>
-          )}
+            
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+              <div>
+                Najveća obitelj: <strong className="text-slate-700">{familyStats.largestCount} djece</strong> <span className="text-slate-400">({familyStats.largestName})</span>
+              </div>
+              <span className="text-slate-300">•</span>
+              <div className="font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
+                {familyStats.knownCount} poznatih obitelji
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div className="flex-1 relative bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none" ref={containerRef}>
+          <button onClick={toggleFullscreen} className="absolute top-3 left-3 z-10 w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors print:hidden" title={isFullscreen ? "Izađi iz cijelog zaslona" : "Cijeli zaslon"}>
+            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <div className="absolute top-3 right-3 z-10 flex items-center bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden print:hidden">
+            <button onClick={() => doZoom('in')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Povećaj"><Plus size={15} /></button>
+            <button onClick={() => doZoom('reset')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Centriraj"><Target size={15} /></button>
+            <button onClick={() => doZoom('out')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 transition-colors" title="Smanji"><Minus size={15} /></button>
+          </div>
+          <svg ref={svgRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing touch-none" />
+        </div>
+      </div>
 
-          {/* Action buttons */}
-          <div className="flex gap-2 items-center">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 text-sm font-bold transition-colors">
-              <Download size={13} /> PDF
-            </button>
-            <button onClick={() => setSelectedPerson(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-sm font-bold transition-colors">
-              <X size={13} /> Zatvori
-            </button>
+      {/* Side Legend */}
+      <div className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden print:hidden">
+        <div className="px-4 py-3.5 border-b border-slate-100 shrink-0">
+          <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+            {colorMode === 'generation' ? 'Generacije'
+              : colorMode === 'dob_roditelja' ? 'Dob roditelja pri rođenju'
+              : colorMode === 'obitelj' ? 'Broj djece u obitelji'
+              : colorMode === 'drzava' ? 'Država rođenja'
+              : 'Regija rođenja (Lands)'} <span className="font-normal normal-case text-slate-300">· pređite mišem</span>
+          </p>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {isGenAgeMode && genAgeLegendCounts ? (
+            <>
+              {/* Age Ranges */}
+              <div className="space-y-2.5">
+                {GEN_AGE_RANGES.map(r => {
+                  const rangeKey = r.label.replace('–', '-') as keyof typeof genAgeLegendCounts;
+                  const count = genAgeLegendCounts[rangeKey] || 0;
+                  return (
+                    <div 
+                      key={r.label} 
+                      className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                      onMouseEnter={() => {
+                        const [minAge, maxAge] = r.label.split('–').map(Number);
+                        highlightGroup(n => {
+                          if (n.ahnentafel <= 1 || !n.known) return false;
+                          const child = nodesByAhn.get(Math.floor(n.ahnentafel / 2));
+                          if (child && n.birth_year && child.birth_year) {
+                            const age = child.birth_year - n.birth_year;
+                            return age >= minAge && age <= maxAge;
+                          }
+                          return false;
+                        });
+                      }}
+                      onMouseLeave={resetHighlight}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: r.color }} />
+                        <span className="font-bold text-slate-700">{r.label} god.</span>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              <div className="h-px bg-slate-100" />
+              
+              {/* Gender Counts */}
+              <div className="space-y-2 text-xs font-semibold text-slate-600">
+                <div className="flex justify-between items-center cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors"
+                  onMouseEnter={() => highlightGroup(n => n.known && n.ahnentafel > 1 && n.sex === 'M')}
+                  onMouseLeave={resetHighlight}
+                >
+                  <span className="flex items-center gap-1.5"><span className="text-blue-500">♂</span> Muški (Očevi)</span>
+                  <span className="text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-md">{genAgeLegendCounts.men}</span>
+                </div>
+                <div className="flex justify-between items-center cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors"
+                  onMouseEnter={() => highlightGroup(n => n.known && n.ahnentafel > 1 && n.sex === 'F')}
+                  onMouseLeave={resetHighlight}
+                >
+                  <span className="flex items-center gap-1.5"><span className="text-pink-500">♀</span> Ženski (Majke)</span>
+                  <span className="text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-md">{genAgeLegendCounts.women}</span>
+                </div>
+              </div>
+            </>
+          ) : isFamilyMode && familyLegendCounts ? (
+            <>
+              {/* Family Categories */}
+              <div className="space-y-2.5">
+                {FAMILY_CATEGORIES.map(r => {
+                  const countKey = r.id as keyof typeof familyLegendCounts;
+                  const count = familyLegendCounts[countKey] || 0;
+                  return (
+                    <div 
+                      key={r.id} 
+                      className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                      onMouseEnter={() => highlightGroup(n => checkCategoryMatch(n, r.id))}
+                      onMouseLeave={resetHighlight}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm transition-transform group-hover:scale-110" style={{ backgroundColor: r.color }} />
+                        <span className="font-bold text-slate-700">{r.label}</span>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md transition-colors group-hover:bg-slate-200">
+                        {count}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : colorMode === 'drzava' && countryLegendStats ? (
+            <div className="space-y-2.5">
+              {countryLegendStats.list.map(item => {
+                const color = d3.scaleOrdinal(d3.schemeSet2)(item.label);
+                return (
+                  <div 
+                    key={item.label} 
+                    className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                    onMouseEnter={() => highlightGroup(n => n.known && n.birth_place?.split(',').pop()?.trim() === item.label)}
+                    onMouseLeave={resetHighlight}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: color }} />
+                      <span className="font-bold text-slate-700">{item.label}</span>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{item.count}</span>
+                  </div>
+                );
+              })}
+              {countryLegendStats.unknownCount > 0 && (
+                <div 
+                  className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors opacity-70"
+                  onMouseEnter={() => highlightGroup(n => !n.known || !n.birth_place)}
+                  onMouseLeave={resetHighlight}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-3.5 h-3.5 rounded shrink-0 bg-slate-300" />
+                    <span className="font-bold text-slate-700">Nepoznato</span>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{countryLegendStats.unknownCount}</span>
+                </div>
+              )}
+            </div>
+          ) : colorMode === 'lands' && landsLegendStats ? (
+            <div className="space-y-2.5">
+              {landsLegendStats.list.map(item => {
+                const color = d3.scaleOrdinal(d3.schemeSet3)(item.label);
+                return (
+                  <div 
+                    key={item.label} 
+                    className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                    onMouseEnter={() => highlightGroup(n => n.known && getPlaceLand(n.birth_place) === item.label)}
+                    onMouseLeave={resetHighlight}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: color }} />
+                      <span className="font-bold text-slate-700">{item.label}</span>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{item.count}</span>
+                  </div>
+                );
+              })}
+              {landsLegendStats.unknownCount > 0 && (
+                <div 
+                  className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors opacity-70"
+                  onMouseEnter={() => highlightGroup(n => !n.known || !getPlaceLand(n.birth_place))}
+                  onMouseLeave={resetHighlight}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-3.5 h-3.5 rounded shrink-0 bg-slate-300" />
+                    <span className="font-bold text-slate-700">Nepoznato</span>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{landsLegendStats.unknownCount}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            legendStats.map((s, i) => (
+              <div 
+                key={i} 
+                className="flex items-start gap-3.5 cursor-pointer hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                onMouseEnter={() => highlightGroup(n => n.known && n.generation === s.total)} // wait, generation index matches i
+                onMouseLeave={resetHighlight}
+              >
+                <div className="w-4 h-4 rounded-md mt-0.5 shrink-0 shadow-sm"
+                  style={{ backgroundColor: i < GENERATION_COLORS.length ? GENERATION_COLORS[i] : '#94a3b8' }} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-bold text-slate-800 leading-snug truncate">
+                    {i === 0 ? (focalPerson?.names[0]?.full || s.label) : s.label}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {i === 0 ? 'Odabrana osoba' : `${s.known} od ${s.total} poznato`}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        
+        {/* Legend instructions card */}
+        <div className="p-4 bg-slate-50/50 border-t border-slate-100 shrink-0">
+          <div className="p-3 bg-white border border-slate-200/60 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] text-xs text-slate-600 space-y-2 leading-normal">
+            {isGenAgeMode ? (
+              <>
+                <p>Boja segmenta označava <strong>starost pretka</strong> u trenutku rođenja njegovog djeteta.</p>
+                <p><strong>Broj u kružiću</strong> na rubu prikazuje prosječni generacijski jaz za tu specifičnu liniju predaka.</p>
+                <p><strong>Zadržite miš</strong> za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).</p>
+                <p><strong>Siva boja</strong> označava nedostatak podataka o rođenju.</p>
+              </>
+            ) : isFamilyMode ? (
+              <>
+                <p>Boja segmenta označava <strong>broj djece</strong> u obitelji u kojoj je taj predak odrastao (on + braća i sestre).</p>
+                <p>Braća i sestre koji su preminuli u <strong>prvoj godini života</strong> nisu pribrojeni.</p>
+                <p><strong>Zadržite miš</strong> preko pretka za točan broj i prosjek generacije, ili pređite preko stavke u legendi za isticanje te skupine.</p>
+                <p><strong>Siva boja</strong> označava da rodna obitelj tog pretka nije zabilježena u stablu.</p>
+              </>
+            ) : colorMode === 'drzava' ? (
+              <>
+                <p>Boja segmenta označava <strong>državu rođenja</strong> pretka.</p>
+                <p><strong>Zadržite miš</strong> preko bilo kojeg pretka za detaljan prikaz, ili pređite preko države u legendi za isticanje.</p>
+              </>
+            ) : colorMode === 'lands' ? (
+              <>
+                <p>Boja segmenta označava <strong>regiju ili županiju</strong> rođenja pretka.</p>
+                <p>Koristan prikaz za praćenje regionalnog podrijetla predaka.</p>
+              </>
+            ) : (
+              <>
+                <p><strong className="text-slate-800">Obojani</strong> segmenti imaju poznate pretke.</p>
+                <p><strong className="text-slate-800">Sivi</strong> segmenti nedostaju u vašem stablu.</p>
+                <p>Zadržite miš za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).</p>
+              </>
+            )}
+            <p className="text-[10px] text-slate-400 italic border-t border-slate-100/80 pt-2 mt-1 leading-normal">
+              Kliknite za re-centriranje na tog pretka.
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ─── Main area ─── */}
-      {!selectedPersonId ? (
-        <div className="flex-1 flex items-center justify-center text-slate-400">
-          <p className="font-semibold text-lg">Odaberite osobu za prikaz grafa</p>
-        </div>
-      ) : (
-        <div className="flex-1 flex gap-3 px-3 pb-3 overflow-hidden min-h-0">
-
-          {/* SVG Canvas wrapper */}
-          <div className="flex-1 flex flex-col min-w-0 h-full">
-            {isGenAgeMode && genAgeStats && (
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 mb-3 shrink-0">
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-black text-emerald-600">{genAgeStats.avgTotal}</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Prosječna starost roditelja pri rođenju</span>
-                  </div>
-                  <div className="hidden sm:block h-6 w-px bg-slate-200" />
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="font-semibold text-slate-600 flex items-center gap-1">
-                      <span className="text-blue-500">♂</span> {genAgeStats.avgFathers} očevi
-                    </span>
-                    <span className="text-slate-300">|</span>
-                    <span className="font-semibold text-slate-600 flex items-center gap-1">
-                      <span className="text-pink-500">♀</span> {genAgeStats.avgMothers} majke
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                  <div>
-                    Najmlađi: <strong className="text-slate-700">{genAgeStats.youngestAge} god.</strong> <span className="text-slate-400">({genAgeStats.youngestName})</span>
-                  </div>
-                  <span className="text-slate-300">•</span>
-                  <div>
-                    Najstariji: <strong className="text-slate-700">{genAgeStats.oldestAge} god.</strong> <span className="text-slate-400">({genAgeStats.oldestName})</span>
-                  </div>
-                  <span className="text-slate-300">•</span>
-                  <div className="font-semibold text-teal-600 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-100">
-                    {genAgeStats.knownCount} parova
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isFamilyMode && familyStats && (
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 mb-3 shrink-0">
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-black text-indigo-600">{familyStats.avgTotal}</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Prosječan broj djece po obitelji</span>
-                  </div>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                  <div>
-                    Najveća obitelj: <strong className="text-slate-700">{familyStats.largestCount} djece</strong> <span className="text-slate-400">({familyStats.largestName})</span>
-                  </div>
-                  <span className="text-slate-300">•</span>
-                  <div className="font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
-                    {familyStats.knownCount} poznatih obitelji
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            <div className="flex-1 relative bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" ref={containerRef}>
-            <button onClick={toggleFullscreen} className="absolute top-3 left-3 z-10 w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors" title={isFullscreen ? "Izađi iz cijelog zaslona" : "Cijeli zaslon"}>
-              {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            </button>
-            <div className="absolute top-3 right-3 z-10 flex items-center bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-              <button onClick={() => doZoom('in')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Povećaj"><Plus size={15} /></button>
-              <button onClick={() => doZoom('reset')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Centriraj"><Target size={15} /></button>
-              <button onClick={() => doZoom('out')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 transition-colors" title="Smanji"><Minus size={15} /></button>
-            </div>
-            <svg ref={svgRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing touch-none" />
-          </div>
-        </div>
-
-          {/* Side Legend exactly as user mockup */}
-          <div className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-4 py-3.5 border-b border-slate-100 shrink-0">
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-                {isGenAgeMode ? 'Dob roditelja pri rođenju' : isFamilyMode ? 'Broj djece u obitelji' : 'Generacije'} <span className="font-normal normal-case text-slate-300">· pređite mišem</span>
-              </p>
-            </div>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-              {isGenAgeMode && genAgeLegendCounts ? (
-                <>
-                  {/* Age Ranges */}
-                  <div className="space-y-3">
-                    {GEN_AGE_RANGES.map(r => {
-                      const rangeKey = r.label.replace('–', '-') as keyof typeof genAgeLegendCounts;
-                      const count = genAgeLegendCounts[rangeKey] || 0;
-                      return (
-                        <div key={r.label} className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: r.color }} />
-                            <span className="font-bold text-slate-700">{r.label} god.</span>
-                          </div>
-                          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{count}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  
-                  <div className="h-px bg-slate-100" />
-                  
-                  {/* Gender Counts */}
-                  <div className="space-y-2 text-xs font-semibold text-slate-600">
-                    <div className="flex justify-between items-center">
-                      <span className="flex items-center gap-1.5"><span className="text-blue-500">♂</span> Muški (Očevi)</span>
-                      <span className="text-slate-500">{genAgeLegendCounts.men}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="flex items-center gap-1.5"><span className="text-pink-500">♀</span> Ženski (Majke)</span>
-                      <span className="text-slate-500">{genAgeLegendCounts.women}</span>
-                    </div>
-                  </div>
-                </>
-              ) : isFamilyMode && familyLegendCounts ? (
-                <>
-                  {/* Family Categories */}
-                  <div className="space-y-2.5">
-                    {FAMILY_CATEGORIES.map(r => {
-                      const countKey = r.id as keyof typeof familyLegendCounts;
-                      const count = familyLegendCounts[countKey] || 0;
-                      return (
-                        <div 
-                          key={r.id} 
-                          className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                          onMouseEnter={() => highlightCategory(r.id)}
-                          onMouseLeave={() => resetHighlight()}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm transition-transform group-hover:scale-110" style={{ backgroundColor: r.color }} />
-                            <span className="font-bold text-slate-700">{r.label}</span>
-                          </div>
-                          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md transition-colors group-hover:bg-slate-200">
-                            {count}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                legendStats.map((s, i) => (
-                  <div key={i} className="flex items-start gap-3.5">
-                    <div className="w-4 h-4 rounded-md mt-0.5 shrink-0 shadow-sm transition-transform duration-200 hover:scale-110"
-                      style={{ backgroundColor: i < GENERATION_COLORS.length ? GENERATION_COLORS[i] : '#94a3b8' }} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-bold text-slate-800 leading-snug truncate">
-                        {i === 0 ? (focalPerson?.names[0]?.full || s.label) : s.label}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        {i === 0 ? 'Odabrana osoba' : `${s.known} od ${s.total} poznato`}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            
-            {/* Legend instructions card */}
-            <div className="p-4 bg-slate-50/50 border-t border-slate-100 shrink-0">
-              <div className="p-3 bg-white border border-slate-200/60 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] text-xs text-slate-600 space-y-2 leading-normal">
-                {isGenAgeMode ? (
-                  <>
-                    <p>
-                      Boja segmenta označava <strong>starost pretka</strong> u trenutku rođenja njegovog djeteta.
-                    </p>
-                    <p>
-                      <strong>Broj u kružiću</strong> na rubu prikazuje prosječni generacijski jaz za tu specifičnu liniju predaka.
-                    </p>
-                    <p>
-                      <strong>Zadržite miš</strong> za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).
-                    </p>
-                    <p>
-                      <strong>Siva boja</strong> označava nedostatak podataka o rođenju.
-                    </p>
-                  </>
-                ) : isFamilyMode ? (
-                  <>
-                    <p>
-                      Boja segmenta označava <strong>broj djece</strong> u obitelji u kojoj je taj predak odrastao (on + braća i sestre).
-                    </p>
-                    <p>
-                      Braća i sestre koji su preminuli u <strong>prvoj godini života</strong> nisu pribrojeni.
-                    </p>
-                    <p>
-                      Broje se isključivo <strong>punokrvna braća i sestre</strong> — polubraća i polusestre nisu uključeni.
-                    </p>
-                    <p>
-                      <strong>Zadržite miš</strong> preko pretka za točan broj i prosjek generacije, ili pređite preko stavke u legendi za isticanje te skupine.
-                    </p>
-                    <p>
-                      <strong>Siva boja</strong> označava da rodna obitelj tog pretka nije zabilježena u stablu.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p>
-                      <strong className="text-slate-800">Obojani</strong> segmenti imaju poznate pretke.
-                    </p>
-                    <p>
-                      <strong className="text-slate-800">Sivi</strong> segmenti nedostaju u vašem stablu.
-                    </p>
-                    <p>
-                      Zadržite miš za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).
-                    </p>
-                  </>
-                )}
-                <p className="text-[10px] text-slate-400 italic border-t border-slate-100/80 pt-2 mt-1 leading-normal">
-                  Kliknite za re-centriranje na tog pretka.
-                </p>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      )}
-
-      {/* Help Modal */}
-      <HelpModal 
-        isOpen={helpOpen} 
-        onClose={() => setHelpOpen(false)} 
-        title={isGenAgeMode ? "Generacijska starost (GenAge)" : isFamilyMode ? "Broj djece u obitelji (Obitelj)" : "Kružni graf (Fan Chart)"}
-      >
-        {isGenAgeMode ? (
-          <div className="space-y-4">
-            <p>
-              Ovaj modul analizira <strong>starost roditelja pri rođenju djeteta</strong> kroz sve generacije u vašem obiteljskom stablu. To vam omogućuje da vidite generacijski jaz i prosječnu dob rađanja u različitim granama i razdobljima.
-            </p>
-            <h4 className="font-bold text-slate-800 mt-2 border-b border-slate-100 pb-1">Kako grafikon funkcionira:</h4>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>Svaki prsten predstavlja jednu generaciju predaka (roditelji, djedovi, pradjedovi).</li>
-              <li>Svaki segment je obojan u skladu s dobi koju je taj predak imao u trenutku rođenja djeteta (koje se nalazi u prstenu ispod njega).</li>
-              <li><strong>Pill/Kružić na rubu:</strong> Prikazuje prosječnu generacijsku starost za cijelu tu ancestralnu granu (od najudaljenijeg pretka do fokalne osobe).</li>
-            </ul>
-            <h4 className="font-bold text-slate-800 mt-2 border-b border-slate-100 pb-1">Interakcija:</h4>
-            <ul className="list-disc pl-5 space-y-1">
-              <li><strong>Isticanje linije:</strong> Prelaskom miša preko pretka, grafikon automatski zasjenjuje sve ostale grane za 80% i ostavlja istaknutom samo direktnu liniju od tog pretka do centra.</li>
-              <li>Prosječna dob i precizan niz godina za tu liniju (npr. <span className="font-mono text-teal-600">34 → 39 → 29</span>) prikazuje se u skočnom prozorčiću.</li>
-              <li><strong>Re-centriranje:</strong> Klikom na bilo kojeg pretka postavljate ga u središte grafikona.</li>
-            </ul>
-          </div>
-        ) : isFamilyMode ? (
-          <div className="space-y-4">
-            <p>
-              Ovaj modul analizira <strong>broj djece u rodnoj obitelji predaka</strong> (predak + njegova braća i sestre). Pomaže vam vizualizirati veličinu obitelji kroz generacije i uočiti trendove (npr. velike povijesne obitelji u odnosu na manje moderne obitelji).
-            </p>
-            <h4 className="font-bold text-slate-800 mt-2 border-b border-slate-100 pb-1">Kako grafikon funkcionira:</h4>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>Svaki segment je obojan prema broju djece u obitelji u kojoj je taj predak odrastao.</li>
-              <li><strong>Pravila brojanja:</strong> Broje se isključivo punokrvna braća i sestre (ista oba roditelja). Braća i sestre koji su umrli u prvoj godini života (prije navršenog 1. rođendana) nisu uključeni kako bi se dobila statistika o preživjeloj djeci u kućanstvu.</li>
-              <li><strong>Sivi segmenti:</strong> Označavaju da rodna obitelj tog pretka (njegovi roditelji) nije zabilježena u stablu (što je uobičajeno na rubovima stabla).</li>
-            </ul>
-            <h4 className="font-bold text-slate-800 mt-2 border-b border-slate-100 pb-1">Interakcija i isticanje:</h4>
-            <ul className="list-disc pl-5 space-y-1">
-              <li><strong>Zadržite miš:</strong> Prelaskom miša preko pretka dobit ćete detalje o njegovom imenu, datumima rođenja i smrti, te točan broj braće i sestara.</li>
-              <li><strong>Isticanje iz legende (Legend hover):</strong> Prelaskom miša preko kategorija u legendi na desnoj strani (npr. *Jedino dijete*, *6-7 djece*), grafikon automatski prigušuje sve ostale segmente na 80% kako bi jasno istaknuo one koji pripadaju toj skupini.</li>
-            </ul>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <p>
-              <strong>Kružni graf (Fan Chart)</strong> je vizualni prikaz obiteljskog stabla koji u 360 stupnjeva prikazuje sve pretke odabrane osobe.
-            </p>
-            <h4 className="font-bold text-slate-800 mt-2 border-b border-slate-100 pb-1">Ključne značajke:</h4>
-            <ul className="list-disc pl-5 space-y-1">
-              <li><strong>Simetrični raspored:</strong> Lijeva strana grafikona prikazuje očevu stranu predaka (označeno s <span className="font-bold">Očeva strana</span>), a desna prikazuje majčinu stranu predaka (označeno s <span className="font-bold">Majčina strana</span>).</li>
-              <li><strong>Bojanje po izboru:</strong> Pomoću izbornika na vrhu možete mijenjati bojanje (po generacijama, obiteljskim granama, životnom vijeku ili zemlji rođenja).</li>
-              <li><strong>Navigacija:</strong> Zadržite miš iznad pretka za puni pregled datuma i mjesta rođenja i smrti te dobi. Kliknite na segment za re-centriranje na tu osobu.</li>
-            </ul>
-          </div>
-        )}
-      </HelpModal>
     </div>
   );
 }
