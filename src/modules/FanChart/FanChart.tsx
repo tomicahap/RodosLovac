@@ -135,10 +135,10 @@ export default function FanChart() {
                 <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 gap-0.5">
                   {([
                     { id: 'generation', label: 'Gen' },
-                    { id: 'dob_roditelja', label: 'GenAge' },
-                    { id: 'obitelj', label: 'Family' },
-                    { id: 'drzava', label: 'Country' },
-                    { id: 'lands', label: 'Lands' },
+                    { id: 'dob_roditelja', label: 'Dob rod.' },
+                    { id: 'obitelj', label: 'Obitelj' },
+                    { id: 'drzava', label: 'Država' },
+                    { id: 'lands', label: 'Krajevi' },
                   ] as { id: ColorMode; label: string }[]).map(c => (
                     <button key={c.id} onClick={() => setColorMode(c.id)}
                       className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${

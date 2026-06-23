@@ -1341,7 +1341,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
               : colorMode === 'dob_roditelja' ? 'Dob roditelja pri rođenju'
               : colorMode === 'obitelj' ? 'Broj djece u obitelji'
               : colorMode === 'drzava' ? 'Država rođenja'
-              : 'Regija rođenja (Lands)'} <span className="font-normal normal-case text-slate-300">· pređite mišem</span>
+              : 'Krajevi rođenja'} <span className="font-normal normal-case text-slate-300">· pređite mišem</span>
           </p>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">

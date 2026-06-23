@@ -91,7 +91,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const graph = new TreeGraph(tree);
             
             const elapsed = Date.now() - start;
-            const remaining = Math.max(0, 9000 - elapsed);
+            const remaining = Math.max(0, 5000 - elapsed);
 
             setTimeout(() => {
               // Pick first person as default selected
