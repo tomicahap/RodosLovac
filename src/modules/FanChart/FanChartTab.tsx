@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback, useId } from 'react';
 import * as d3 from 'd3';
 import { useApp } from '../../context/AppContext';
-import { Maximize2, Minimize2, Plus, Minus, Target } from 'lucide-react';
+import { Maximize2, Minimize2, Plus, Minus, Target, Download, X } from 'lucide-react';
 import { ColorMode } from './FanChart';
+import { getCountryFromPlace, getPlaceLand } from '../../utils/countryHelper';
 
 interface AncNode {
   id: string;
@@ -22,7 +23,7 @@ const FAMILY_CATEGORIES = [
   { id: 'only_child', label: 'Jedino dijete', color: '#4f46e5', match: (n: number | null | undefined) => n === 1 },
   { id: '2', label: '2', color: '#0ea5e9', match: (n: number | null | undefined) => n === 2 },
   { id: '3', label: '3', color: '#10b981', match: (n: number | null | undefined) => n === 3 },
-  { id: '4_5', label: '4–5', color: '#eab308', match: (n: number | null | undefined) => n !== null && n !== undefined && n >= 4 && n <= 5 },
+  { id: '4_5', label: '4–5', color: '#a855f7', match: (n: number | null | undefined) => n !== null && n !== undefined && n >= 4 && n <= 5 },
   { id: '6_7', label: '6–7', color: '#f97316', match: (n: number | null | undefined) => n !== null && n !== undefined && n >= 6 && n <= 7 },
   { id: '8_9', label: '8–9', color: '#ef4444', match: (n: number | null | undefined) => n !== null && n !== undefined && n >= 8 && n <= 9 },
   { id: '10_plus', label: '10 +', color: '#991b1b', match: (n: number | null | undefined) => n !== null && n !== undefined && n >= 10 },
@@ -33,7 +34,7 @@ const GEN_AGE_RANGES = [
   { label: '20–24', color: '#2563eb' },
   { label: '25–29', color: '#06b6d4' },
   { label: '30–34', color: '#10b981' },
-  { label: '35–39', color: '#eab308' },
+  { label: '35–39', color: '#a855f7' },
   { label: '40–44', color: '#f97316' },
   { label: '45–49', color: '#ef4444' },
 ];
@@ -43,20 +44,13 @@ const getGenAgeColor = (age: number): string => {
   if (age <= 24) return '#2563eb'; // blue
   if (age <= 29) return '#06b6d4'; // cyan
   if (age <= 34) return '#10b981'; // green
-  if (age <= 39) return '#eab308'; // yellow
+  if (age <= 39) return '#a855f7'; // purple
   if (age <= 44) return '#f97316'; // orange
   if (age <= 49) return '#ef4444'; // red
   return '#be123c'; // deep red
 };
 
-const getPlaceLand = (place: string | null): string | null => {
-  if (!place) return null;
-  const parts = place.split(',').map(p => p.trim()).filter(Boolean);
-  if (parts.length >= 2) {
-    return parts[parts.length - 2]; // second-to-last, e.g. "Vukovar-Srijem"
-  }
-  return parts[0] || null;
-};
+
 
 const getGenerationLabelCroatian = (gen: number, sex: string): string => {
   if (gen === 0) return 'ODABRANA OSOBA';
@@ -99,14 +93,24 @@ const GEN_LABELS = [
 interface Props {
   mini?: boolean;
   maxGenerations: number;
+  setMaxGenerations?: (g: number) => void;
   colorMode: ColorMode;
+  setColorMode?: (c: ColorMode) => void;
   isHalfFan?: boolean;
 }
 
-export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'generation', isHalfFan = false }: Props) {
+export default function FanChartTab({ 
+  mini, 
+  maxGenerations = 4, 
+  setMaxGenerations, 
+  colorMode = 'generation', 
+  setColorMode, 
+  isHalfFan = false 
+}: Props) {
   const reactId = useId();
   const idPrefix = reactId.replace(/:/g, '-');
   const { tree, graph, selectedPersonId, setSelectedPerson } = useApp();
+  const selectedPerson = selectedPersonId && tree ? tree.persons.get(selectedPersonId) : null;
   
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -409,7 +413,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
     const traverse = (n: AncNode) => {
       if (n.known) {
         if (n.birth_place) {
-          const country = n.birth_place.split(',').pop()?.trim() || 'Nepoznato';
+          const country = getCountryFromPlace(n.birth_place);
           counts.set(country, (counts.get(country) || 0) + 1);
         } else {
           unknownCount++;
@@ -468,6 +472,10 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
     return stats;
   }, [rootData, maxGenerations]);
 
+  // Stable color scales
+  const countryColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeSet2), []);
+  const landsColorScale = useMemo(() => d3.scaleOrdinal(d3.schemeSet3), []);
+
   // Color logic
   const getColor = useCallback((node: AncNode, cm: ColorMode): string => {
     if (!node.known) return UNKNOWN_COLOR;
@@ -476,11 +484,11 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
         return GENERATION_COLORS[node.generation] ?? GENERATION_COLORS[GENERATION_COLORS.length - 1];
       case 'drzava':
         if (!node.birth_place) return '#cbd5e1';
-        return d3.scaleOrdinal(d3.schemeSet2)(node.birth_place.split(',').pop()?.trim() || '');
+        return countryColorScale(getCountryFromPlace(node.birth_place));
       case 'lands': {
         const land = getPlaceLand(node.birth_place);
         if (!land) return '#cbd5e1';
-        return d3.scaleOrdinal(d3.schemeSet3)(land);
+        return landsColorScale(land);
       }
       case 'dob_roditelja':
         return '#cbd5e1'; // fallback handled locally
@@ -490,7 +498,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
         if (count === 1) return '#4f46e5';
         if (count === 2) return '#0ea5e9';
         if (count === 3) return '#10b981';
-        if (count >= 4 && count <= 5) return '#eab308';
+        if (count >= 4 && count <= 5) return '#a855f7';
         if (count >= 6 && count <= 7) return '#f97316';
         if (count >= 8 && count <= 9) return '#ef4444';
         return '#991b1b';
@@ -498,7 +506,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
       default:
         return UNKNOWN_COLOR;
     }
-  }, []);
+  }, [countryColorScale, landsColorScale]);
 
   const checkCategoryMatch = useCallback((node: AncNode, catId: string): boolean => {
     if (!node.known) return catId === 'not_in_tree';
@@ -788,7 +796,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
 
         let placeStr = '';
         if (colorMode === 'drzava' && node.birth_place) {
-          placeStr = `<div class="text-xs text-slate-600 mt-0.5">🌍 <strong>Država rođenja:</strong> ${node.birth_place.split(',').pop()?.trim()}</div>`;
+          placeStr = `<div class="text-xs text-slate-600 mt-0.5">🌍 <strong>Država rođenja:</strong> ${getCountryFromPlace(node.birth_place)}</div>`;
         } else if (colorMode === 'lands' && node.birth_place) {
           placeStr = `<div class="text-xs text-slate-600 mt-0.5">🏔️ <strong>Regija/Kraj:</strong> ${getPlaceLand(node.birth_place)}</div>`;
         }
@@ -1245,27 +1253,86 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
     }
   };
 
-  if (!tree) return null;
-
-  if (mini) {
-    return (
-      <div className="w-full h-full relative" ref={containerRef}>
-        <div ref={tooltipRef} className="fixed z-50 bg-white border border-slate-200 shadow-xl rounded-xl p-3 pointer-events-none hidden text-sm" style={{ maxWidth: '240px' }} />
-        <svg ref={svgRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 flex gap-3 px-3 pb-3 overflow-hidden min-h-0">
-
+return (
+    <div className="flex-1 flex flex-col gap-3 px-3 pb-3 overflow-hidden min-h-0">
       {/* Tooltip */}
       <div ref={tooltipRef} className="fixed z-50 bg-white border border-slate-200 shadow-xl rounded-xl p-3 pointer-events-none hidden text-sm" style={{ maxWidth: '240px' }} />
 
-      {/* SVG Canvas wrapper */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      {/* Top Header Controls Panel */}
+      <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 print:hidden ${mini ? 'hidden' : 'flex'}`}>
+        {/* Selected Person Details - Large and Visible */}
+        <div className="flex items-center gap-4 flex-1">
+          {selectedPerson ? (
+            <div className="flex items-center gap-4 w-full px-2">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center text-3xl border-4 shadow-sm shrink-0
+                ${selectedPerson.sex === 'M' ? 'bg-blue-50 border-blue-200 text-blue-500'
+                : selectedPerson.sex === 'F' ? 'bg-pink-50 border-pink-200 text-pink-500'
+                : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
+                {selectedPerson.sex === 'M' ? '♂' : selectedPerson.sex === 'F' ? '♀' : '?'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-extrabold text-xl text-slate-800 truncate leading-tight">{selectedPerson.names[0]?.full || 'Nepoznato'}</h2>
+                <div className="flex items-center gap-2 mt-1 text-sm text-slate-500 font-medium">
+                  {selectedPerson.birth?.date?.year ? <span>Rođen/a {selectedPerson.birth.date.year}.</span> : <span>Nepoznata godina rođenja</span>}
+                  <button onClick={() => setSelectedPerson(null)} className="ml-2 px-2 py-0.5 rounded-md border border-slate-200 hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors text-xs font-bold" title="Zatvori osobu">
+                    Zatvori
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-400 font-medium italic py-3 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl w-full text-center">
+              Kliknite na osobu u grafu kako biste postavili fokus na nju
+            </div>
+          )}
+        </div>
+
+        {/* Options Panel on the Right */}
+        <div className="flex flex-col items-end gap-3 shrink-0">
+          {/* Generations picker */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Generacije:</span>
+            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 gap-0.5 shadow-inner">
+              {[3, 4, 5, 6, 7].map(g => (
+                <button key={g} onClick={() => setMaxGenerations?.(g)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-center ${
+                    maxGenerations === g
+                      ? 'bg-white text-teal-600 shadow-sm border border-teal-100 scale-105'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
+                  {g} gen
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Color modes list */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Vrsta prikaza:</span>
+            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 gap-0.5 shadow-inner">
+              {([
+                { id: 'generation', label: 'Generacijski slojevi' },
+                { id: 'dob_roditelja', label: 'Generacijska dob' },
+                { id: 'obitelj', label: 'Brojnost obitelji' },
+                { id: 'drzava', label: 'Država rođenja' },
+                { id: 'lands', label: 'Kraj rođenja (regija)' },
+              ] as { id: ColorMode; label: string }[]).map(c => (
+                <button key={c.id} onClick={() => setColorMode?.(c.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    colorMode === c.id
+                      ? 'bg-white text-teal-600 shadow-sm border border-teal-100 scale-105'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SVG Canvas wrapper column */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 gap-3">
         {isGenAgeMode && genAgeStats && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 mb-3 shrink-0 print:hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 shrink-0 print:hidden">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-black text-emerald-600">{genAgeStats.avgTotal}</span>
@@ -1300,7 +1367,7 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
         )}
 
         {isFamilyMode && familyStats && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 mb-3 shrink-0 print:hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-4 shrink-0 print:hidden">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-black text-indigo-600">{familyStats.avgTotal}</span>
@@ -1320,242 +1387,257 @@ export default function FanChartTab({ mini, maxGenerations = 4, colorMode = 'gen
           </div>
         )}
         
-        <div className="flex-1 relative bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none" ref={containerRef}>
-          <button onClick={toggleFullscreen} className="absolute top-3 left-3 z-10 w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors print:hidden" title={isFullscreen ? "Izađi iz cijelog zaslona" : "Cijeli zaslon"}>
-            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-          </button>
-          <div className="absolute top-3 right-3 z-10 flex items-center bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden print:hidden">
-            <button onClick={() => doZoom('in')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Povećaj"><Plus size={15} /></button>
-            <button onClick={() => doZoom('reset')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Centriraj"><Target size={15} /></button>
-            <button onClick={() => doZoom('out')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 transition-colors" title="Smanji"><Minus size={15} /></button>
+        {/* Row for canvas & side legend */}
+        <div className="flex-1 flex gap-3 min-h-0 overflow-hidden">
+          <div className="flex-1 relative bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none" ref={containerRef}>
+            <button onClick={toggleFullscreen} className="absolute top-3 left-3 z-10 w-8 h-8 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors print:hidden" title={isFullscreen ? "Izađi iz cijelog zaslona" : "Cijeli zaslon"}>
+              {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+            <div className="absolute top-3 right-3 z-10 flex items-center bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden print:hidden">
+              <button onClick={() => doZoom('in')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Povećaj"><Plus size={15} /></button>
+              <button onClick={() => doZoom('reset')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 border-r border-slate-200 transition-colors" title="Centriraj"><Target size={15} /></button>
+              <button onClick={() => doZoom('out')} className="w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-teal-600 transition-colors" title="Smanji"><Minus size={15} /></button>
+            </div>
+            <svg ref={svgRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing touch-none" />
           </div>
-          <svg ref={svgRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing touch-none" />
-        </div>
-      </div>
 
-      {/* Side Legend */}
-      <div className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden print:hidden">
-        <div className="px-4 py-3.5 border-b border-slate-100 shrink-0">
-          <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
-            {colorMode === 'generation' ? 'Generacije'
-              : colorMode === 'dob_roditelja' ? 'Dob roditelja pri rođenju'
-              : colorMode === 'obitelj' ? 'Broj djece u obitelji'
-              : colorMode === 'drzava' ? 'Država rođenja'
-              : 'Krajevi rođenja'} <span className="font-normal normal-case text-slate-300">· pređite mišem</span>
-          </p>
-        </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {isGenAgeMode && genAgeLegendCounts ? (
-            <>
-              {/* Age Ranges */}
-              <div className="space-y-2.5">
-                {GEN_AGE_RANGES.map(r => {
-                  const rangeKey = r.label.replace('–', '-') as keyof typeof genAgeLegendCounts;
-                  const count = genAgeLegendCounts[rangeKey] || 0;
-                  return (
+          {/* Side Legend */}
+          <div className={`w-[300px] shrink-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex-col overflow-hidden print:hidden ${mini ? 'hidden' : 'flex'}`}>
+            {/* Legend Header */}
+            <div className="px-4 py-3.5 border-b border-slate-100 shrink-0">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                {colorMode === 'generation' ? 'Generacije'
+                  : colorMode === 'dob_roditelja' ? 'Starost roditelja'
+                  : colorMode === 'obitelj' ? 'Brojnost obitelji (djeca)'
+                  : colorMode === 'drzava' ? 'Države rođenja'
+                  : 'Regije rođenja'}
+              </p>
+            </div>
+
+            {/* Legend List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {isGenAgeMode && genAgeLegendCounts ? (
+                <>
+                  {/* Age Ranges */}
+                  <div className="space-y-2.5">
+                    {GEN_AGE_RANGES.map(r => {
+                      const rangeKey = r.label.replace('–', '-') as keyof typeof genAgeLegendCounts;
+                      const count = genAgeLegendCounts[rangeKey] || 0;
+                      return (
+                        <div 
+                          key={r.label} 
+                          className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                          onMouseEnter={() => {
+                            const [minAge, maxAge] = r.label.split('–').map(Number);
+                            highlightGroup(n => {
+                              if (n.known && n.ahnentafel > 1) {
+                                const childAhn = Math.floor(n.ahnentafel / 2);
+                                // find matching parent-child age gap
+                                let match = false;
+                                const traverseCheck = (curr: AncNode) => {
+                                  if (curr.ahnentafel === childAhn && curr.birth_year && n.birth_year) {
+                                    const age = curr.birth_year - n.birth_year;
+                                    if (age >= minAge && age <= maxAge) match = true;
+                                  }
+                                  curr.children?.forEach(traverseCheck);
+                                };
+                                if (rootData) traverseCheck(rootData);
+                                return match;
+                              }
+                              return false;
+                            });
+                          }}
+                          onMouseLeave={resetHighlight}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: r.color }} />
+                            <span className="font-bold text-slate-700">{r.label} god.</span>
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  <div className="h-px bg-slate-100" />
+                  
+                  {/* Gender Counts */}
+                  <div className="space-y-2 text-xs font-semibold text-slate-600">
+                    <div className="flex justify-between items-center cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors"
+                      onMouseEnter={() => highlightGroup(n => n.known && n.ahnentafel > 1 && n.sex === 'M')}
+                      onMouseLeave={resetHighlight}
+                    >
+                      <span className="flex items-center gap-1.5"><span className="text-blue-500">♂</span> Muški (Očevi)</span>
+                      <span className="text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-md">{genAgeLegendCounts.men}</span>
+                    </div>
+                    <div className="flex justify-between items-center cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors"
+                      onMouseEnter={() => highlightGroup(n => n.known && n.ahnentafel > 1 && n.sex === 'F')}
+                      onMouseLeave={resetHighlight}
+                    >
+                      <span className="flex items-center gap-1.5"><span className="text-pink-500">♀</span> Ženski (Majke)</span>
+                      <span className="text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-md">{genAgeLegendCounts.women}</span>
+                    </div>
+                  </div>
+                </>
+              ) : isFamilyMode && familyLegendCounts ? (
+                <>
+                  {/* Family Categories */}
+                  <div className="space-y-2.5">
+                    {FAMILY_CATEGORIES.map(r => {
+                      const countKey = r.id as keyof typeof familyLegendCounts;
+                      const count = familyLegendCounts[countKey] || 0;
+                      return (
+                        <div 
+                          key={r.id} 
+                          className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                          onMouseEnter={() => highlightGroup(n => checkCategoryMatch(n, r.id))}
+                          onMouseLeave={resetHighlight}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm transition-transform group-hover:scale-110" style={{ backgroundColor: r.color }} />
+                            <span className="font-bold text-slate-700">{r.label}</span>
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md transition-colors group-hover:bg-slate-200">
+                            {count}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : colorMode === 'drzava' && countryLegendStats ? (
+                <div className="space-y-2.5">
+                  {countryLegendStats.list.map(item => {
+                    const color = countryColorScale(item.label);
+                    return (
+                      <div 
+                        key={item.label} 
+                        className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                        onMouseEnter={() => highlightGroup(n => n.known && getCountryFromPlace(n.birth_place) === item.label)}
+                        onMouseLeave={resetHighlight}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: color }} />
+                          <span className="font-bold text-slate-700">{item.label}</span>
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{item.count}</span>
+                      </div>
+                    );
+                  })}
+                  {countryLegendStats.unknownCount > 0 && (
                     <div 
-                      key={r.label} 
-                      className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                      onMouseEnter={() => {
-                        const [minAge, maxAge] = r.label.split('–').map(Number);
-                        highlightGroup(n => {
-                          if (n.ahnentafel <= 1 || !n.known) return false;
-                          const child = nodesByAhn.get(Math.floor(n.ahnentafel / 2));
-                          if (child && n.birth_year && child.birth_year) {
-                            const age = child.birth_year - n.birth_year;
-                            return age >= minAge && age <= maxAge;
-                          }
-                          return false;
-                        });
-                      }}
+                      className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors opacity-70"
+                      onMouseEnter={() => highlightGroup(n => !n.known || !n.birth_place)}
                       onMouseLeave={resetHighlight}
                     >
                       <div className="flex items-center gap-2.5">
-                        <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: r.color }} />
-                        <span className="font-bold text-slate-700">{r.label} god.</span>
+                        <div className="w-3.5 h-3.5 rounded shrink-0 bg-slate-300" />
+                        <span className="font-bold text-slate-700">Nepoznato</span>
                       </div>
-                      <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{count}</span>
+                      <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{countryLegendStats.unknownCount}</span>
                     </div>
-                  );
-                })}
-              </div>
-              
-              <div className="h-px bg-slate-100" />
-              
-              {/* Gender Counts */}
-              <div className="space-y-2 text-xs font-semibold text-slate-600">
-                <div className="flex justify-between items-center cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors"
-                  onMouseEnter={() => highlightGroup(n => n.known && n.ahnentafel > 1 && n.sex === 'M')}
-                  onMouseLeave={resetHighlight}
-                >
-                  <span className="flex items-center gap-1.5"><span className="text-blue-500">♂</span> Muški (Očevi)</span>
-                  <span className="text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-md">{genAgeLegendCounts.men}</span>
+                  )}
                 </div>
-                <div className="flex justify-between items-center cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors"
-                  onMouseEnter={() => highlightGroup(n => n.known && n.ahnentafel > 1 && n.sex === 'F')}
-                  onMouseLeave={resetHighlight}
-                >
-                  <span className="flex items-center gap-1.5"><span className="text-pink-500">♀</span> Ženski (Majke)</span>
-                  <span className="text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-md">{genAgeLegendCounts.women}</span>
-                </div>
-              </div>
-            </>
-          ) : isFamilyMode && familyLegendCounts ? (
-            <>
-              {/* Family Categories */}
-              <div className="space-y-2.5">
-                {FAMILY_CATEGORIES.map(r => {
-                  const countKey = r.id as keyof typeof familyLegendCounts;
-                  const count = familyLegendCounts[countKey] || 0;
-                  return (
+              ) : colorMode === 'lands' && landsLegendStats ? (
+                <div className="space-y-2.5">
+                  {landsLegendStats.list.map(item => {
+                    const color = landsColorScale(item.label);
+                    return (
+                      <div 
+                        key={item.label} 
+                        className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                        onMouseEnter={() => highlightGroup(n => n.known && getPlaceLand(n.birth_place) === item.label)}
+                        onMouseLeave={resetHighlight}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: color }} />
+                          <span className="font-bold text-slate-700">{item.label}</span>
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{item.count}</span>
+                      </div>
+                    );
+                  })}
+                  {landsLegendStats.unknownCount > 0 && (
                     <div 
-                      key={r.id} 
-                      className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                      onMouseEnter={() => highlightGroup(n => checkCategoryMatch(n, r.id))}
+                      className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors opacity-70"
+                      onMouseEnter={() => highlightGroup(n => !n.known || !getPlaceLand(n.birth_place))}
                       onMouseLeave={resetHighlight}
                     >
                       <div className="flex items-center gap-2.5">
-                        <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm transition-transform group-hover:scale-110" style={{ backgroundColor: r.color }} />
-                        <span className="font-bold text-slate-700">{r.label}</span>
+                        <div className="w-3.5 h-3.5 rounded shrink-0 bg-slate-300" />
+                        <span className="font-bold text-slate-700">Nepoznato</span>
                       </div>
-                      <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md transition-colors group-hover:bg-slate-200">
-                        {count}
-                      </span>
+                      <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{landsLegendStats.unknownCount}</span>
                     </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : colorMode === 'drzava' && countryLegendStats ? (
-            <div className="space-y-2.5">
-              {countryLegendStats.list.map(item => {
-                const color = d3.scaleOrdinal(d3.schemeSet2)(item.label);
-                return (
+                  )}
+                </div>
+              ) : (
+                legendStats.map((s, i) => (
                   <div 
-                    key={item.label} 
-                    className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                    onMouseEnter={() => highlightGroup(n => n.known && n.birth_place?.split(',').pop()?.trim() === item.label)}
+                    key={i} 
+                    className="flex items-start gap-3.5 cursor-pointer hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
+                    onMouseEnter={() => highlightGroup(n => n.known && n.generation === i)}
                     onMouseLeave={resetHighlight}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: color }} />
-                      <span className="font-bold text-slate-700">{item.label}</span>
+                    <div className="w-4 h-4 rounded-md mt-0.5 shrink-0 shadow-sm"
+                      style={{ backgroundColor: i < GENERATION_COLORS.length ? GENERATION_COLORS[i] : '#94a3b8' }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-bold text-slate-800 leading-snug truncate">
+                        {i === 0 ? (focalPerson?.names[0]?.full || s.label) : s.label}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {i === 0 ? 'Odabrana osoba' : `${s.known} od ${s.total} poznato`}
+                      </div>
                     </div>
-                    <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{item.count}</span>
                   </div>
-                );
-              })}
-              {countryLegendStats.unknownCount > 0 && (
-                <div 
-                  className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors opacity-70"
-                  onMouseEnter={() => highlightGroup(n => !n.known || !n.birth_place)}
-                  onMouseLeave={resetHighlight}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-3.5 h-3.5 rounded shrink-0 bg-slate-300" />
-                    <span className="font-bold text-slate-700">Nepoznato</span>
-                  </div>
-                  <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{countryLegendStats.unknownCount}</span>
-                </div>
+                ))
               )}
             </div>
-          ) : colorMode === 'lands' && landsLegendStats ? (
-            <div className="space-y-2.5">
-              {landsLegendStats.list.map(item => {
-                const color = d3.scaleOrdinal(d3.schemeSet3)(item.label);
-                return (
-                  <div 
-                    key={item.label} 
-                    className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                    onMouseEnter={() => highlightGroup(n => n.known && getPlaceLand(n.birth_place) === item.label)}
-                    onMouseLeave={resetHighlight}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-3.5 h-3.5 rounded shrink-0 shadow-sm" style={{ backgroundColor: color }} />
-                      <span className="font-bold text-slate-700">{item.label}</span>
-                    </div>
-                    <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{item.count}</span>
-                  </div>
-                );
-              })}
-              {landsLegendStats.unknownCount > 0 && (
-                <div 
-                  className="flex items-center justify-between text-xs cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors opacity-70"
-                  onMouseEnter={() => highlightGroup(n => !n.known || !getPlaceLand(n.birth_place))}
-                  onMouseLeave={resetHighlight}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-3.5 h-3.5 rounded shrink-0 bg-slate-300" />
-                    <span className="font-bold text-slate-700">Nepoznato</span>
-                  </div>
-                  <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{landsLegendStats.unknownCount}</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            legendStats.map((s, i) => (
-              <div 
-                key={i} 
-                className="flex items-start gap-3.5 cursor-pointer hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                onMouseEnter={() => highlightGroup(n => n.known && n.generation === s.total)} // wait, generation index matches i
-                onMouseLeave={resetHighlight}
-              >
-                <div className="w-4 h-4 rounded-md mt-0.5 shrink-0 shadow-sm"
-                  style={{ backgroundColor: i < GENERATION_COLORS.length ? GENERATION_COLORS[i] : '#94a3b8' }} />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-bold text-slate-800 leading-snug truncate">
-                    {i === 0 ? (focalPerson?.names[0]?.full || s.label) : s.label}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    {i === 0 ? 'Odabrana osoba' : `${s.known} od ${s.total} poznato`}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-        
-        {/* Legend instructions card */}
-        <div className="p-4 bg-slate-50/50 border-t border-slate-100 shrink-0">
-          <div className="p-3 bg-white border border-slate-200/60 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] text-xs text-slate-600 space-y-2 leading-normal">
-            {isGenAgeMode ? (
-              <>
-                <p>Boja segmenta označava <strong>starost pretka</strong> u trenutku rođenja njegovog djeteta.</p>
-                <p><strong>Broj u kružiću</strong> na rubu prikazuje prosječni generacijski jaz za tu specifičnu liniju predaka.</p>
-                <p><strong>Zadržite miš</strong> za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).</p>
-                <p><strong>Siva boja</strong> označava nedostatak podataka o rođenju.</p>
-              </>
-            ) : isFamilyMode ? (
-              <>
-                <p>Boja segmenta označava <strong>broj djece</strong> u obitelji u kojoj je taj predak odrastao (on + braća i sestre).</p>
-                <p>Braća i sestre koji su preminuli u <strong>prvoj godini života</strong> nisu pribrojeni.</p>
-                <p><strong>Zadržite miš</strong> preko pretka za točan broj i prosjek generacije, ili pređite preko stavke u legendi za isticanje te skupine.</p>
-                <p><strong>Siva boja</strong> označava da rodna obitelj tog pretka nije zabilježena u stablu.</p>
-              </>
-            ) : colorMode === 'drzava' ? (
-              <>
-                <p>Boja segmenta označava <strong>državu rođenja</strong> pretka.</p>
-                <p><strong>Zadržite miš</strong> preko bilo kojeg pretka za detaljan prikaz, ili pređite preko države u legendi za isticanje.</p>
-              </>
-            ) : colorMode === 'lands' ? (
-              <>
-                <p>Boja segmenta označava <strong>regiju ili županiju</strong> rođenja pretka.</p>
-                <p>Koristan prikaz za praćenje regionalnog podrijetla predaka.</p>
-              </>
-            ) : (
-              <>
-                <p><strong className="text-slate-800">Obojani</strong> segmenti imaju poznate pretke.</p>
-                <p><strong className="text-slate-800">Sivi</strong> segmenti nedostaju u vašem stablu.</p>
-                <p>Zadržite miš za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).</p>
-              </>
-            )}
-            <p className="text-[10px] text-slate-400 italic border-t border-slate-100/80 pt-2 mt-1 leading-normal">
-              Kliknite za re-centriranje na tog pretka.
-            </p>
           </div>
         </div>
       </div>
 
+      {/* Description / Instructions */}
+      <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 p-4 shrink-0 print:hidden text-xs text-slate-600 ${mini ? 'hidden' : 'block'}`}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+          <div className="space-y-1">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Upute i pojašnjenje</span>
+            <div className="leading-relaxed">
+              {isGenAgeMode ? (
+                <>
+                  Boja segmenta označava <strong>starost pretka</strong> u trenutku rođenja njegovog djeteta. 
+                  Broj u kružiću na rubu prikazuje prosječni generacijski jaz za tu specifičnu liniju predaka. 
+                  Siva boja označava nedostatak podataka o rođenju.
+                </>
+              ) : isFamilyMode ? (
+                <>
+                  Boja segmenta označava <strong>broj djece</strong> u obitelji u kojoj je taj predak odrastao (on + braća i sestre). 
+                  Braća i sestre koji su preminuli u prvoj godini života nisu pribrojeni. 
+                  Siva boja označava da rodna obitelj tog pretka nije zabilježena u stablu.
+                </>
+              ) : colorMode === 'drzava' ? (
+                <>
+                  Boja segmenta označava <strong>državu rođenja</strong> pretka. 
+                  Zadržite miš preko bilo kojeg pretka za detaljan prikaz, ili pređite preko države u legendi za isticanje.
+                </>
+              ) : colorMode === 'lands' ? (
+                <>
+                  Boja segmenta označava <strong>regiju ili županiju</strong> rođenja pretka. 
+                  Koristan prikaz za praćenje regionalnog podrijetla predaka.
+                </>
+              ) : (
+                <>
+                  Obojani segmenti imaju poznate pretke, dok sivi segmenti nedostaju u vašem stablu. 
+                  Zadržite miš za praćenje i isticanje direktne linije (ostale linije bit će zasjenjene za 80%).
+                </>
+              )}
+            </div>
+          </div>
+          <div className="text-[11px] text-slate-400 md:text-right italic">
+            Zadržite miš iznad bilo kojeg pretka za praćenje njegove linije. Kliknite na pretka za re-centriranje grafa na njega.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

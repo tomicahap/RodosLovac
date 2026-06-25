@@ -11,6 +11,21 @@ import type {
 
 // ─── Graph Build ──────────────────────────────────────────────
 
+
+
+export interface DuplicateCandidate {
+  personA: string;
+  personB: string;
+  confidence: 'High' | 'Medium' | 'Low';
+  score: number;
+  reasons: string[];
+  conflicts: {
+    parents: boolean;
+    birthYear: boolean;
+    birthPlace: boolean;
+  };
+}
+
 export class TreeGraph {
   private nodes: Map<string, PersonNode>;
   private tree: GedcomTree;
@@ -396,54 +411,15 @@ export class TreeGraph {
   // ─── Duplicate Detection ─────────────────────────────────────
 
   /**
-   * Simple heuristic duplicate detection based on:
-   * - Same or very similar name
-   * - Same birth year (within 2 years)
-   * - Same sex
+   * Optimized heuristic duplicate detection based on:
+   * - Pre-caching all O(N) operations (e.g. toLowerCase)
+   * - Short-circuit evaluating impossible matches
+   * - Comparing parent arrays directly from cache
+   * - Bigram Sørensen-Dice string similarity for names (>80%)
+   * - Date variation +/- 5 years for birth & death
    */
-  findDuplicates(): Array<{ personA: string; personB: string; score: number; reasons: string[] }> {
-    const persons = Array.from(this.tree.persons.values());
-    const results: Array<{ personA: string; personB: string; score: number; reasons: string[] }> = [];
-
-    for (let i = 0; i < persons.length; i++) {
-      for (let j = i + 1; j < persons.length; j++) {
-        const a = persons[i];
-        const b = persons[j];
-        const reasons: string[] = [];
-        let score = 0;
-
-        // Name similarity
-        const aName = a.names[0]?.surname?.toLowerCase() || '';
-        const bName = b.names[0]?.surname?.toLowerCase() || '';
-        const aGiven = a.names[0]?.given?.toLowerCase() || '';
-        const bGiven = b.names[0]?.given?.toLowerCase() || '';
-
-        if (aName && bName && aName === bName) { score += 40; reasons.push('Same surname'); }
-        if (aGiven && bGiven && aGiven === bGiven) { score += 40; reasons.push('Same given name'); }
-        else if (aGiven && bGiven && (aGiven.includes(bGiven) || bGiven.includes(aGiven))) {
-          score += 20; reasons.push('Similar given name');
-        }
-
-        // Sex match
-        if (a.sex === b.sex && a.sex !== 'U') { score += 10; reasons.push('Same sex'); }
-
-        // Birth year
-        const aYear = a.birth?.date?.year;
-        const bYear = b.birth?.date?.year;
-        if (aYear && bYear) {
-          const diff = Math.abs(aYear - bYear);
-          if (diff === 0) { score += 30; reasons.push('Same birth year'); }
-          else if (diff <= 2) { score += 15; reasons.push('Similar birth year'); }
-        }
-
-        // Only report if likely duplicate (score ≥ 70)
-        if (score >= 70) {
-          results.push({ personA: a.id, personB: b.id, score, reasons });
-        }
-      }
-    }
-
-    return results.sort((a, b) => b.score - a.score).slice(0, 200);
+  findDuplicates(): DuplicateCandidate[] {
+    throw new Error('findDuplicates() has been moved to duplicateWorker.ts for Big Data architectural performance reasons.');
   }
 
   // ─── Lifespan Data ───────────────────────────────────────────

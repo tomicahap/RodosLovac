@@ -62,7 +62,7 @@ export default function NotableFactsCard() {
       icon: <MapPin size={20} />,
       title: `${notableFacts.uniqueLocationsCount} lokacija`,
       desc: 'Jedinstvena mjesta rođenja',
-      onClick: () => setActiveModule('ancestor-map')
+      onClick: () => setActiveModule('maps')
     }
   ];
 

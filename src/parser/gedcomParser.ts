@@ -196,6 +196,9 @@ function extractEvent(record: RawRecord): GedcomEvent {
     else if (child.tag === 'ADDR') {
       // Fold address into place if no place yet
       if (!event.place) event.place = child.value;
+    } else if (['GODP', '_GODP', 'SPON', 'WITN'].includes(child.tag)) {
+      if (!event.godparents) event.godparents = [];
+      event.godparents.push(child.value);
     }
   }
   return event;
@@ -208,7 +211,7 @@ const EVENT_TAGS = new Set([
   'GRAD', 'EMIG', 'IMMI', 'NATU', 'RETI', 'RESI', 'OCCU',
   'EDUC', 'PROP', 'CAST', 'NATI', 'EVEN', 'CHR', 'BURI',
   'BARM', 'BASM', 'BLES', 'CHRA', 'CONF', 'FCOM', 'ORDN',
-  'ORDI', 'ADOP', 'BAPL', 'CONL', 'ENDL', 'SLGC',
+  'ORDI', 'ADOP', 'BAPL', 'CONL', 'ENDL', 'SLGC', 'BAPM',
 ]);
 
 function parseIndi(record: RawRecord): GedcomPerson {

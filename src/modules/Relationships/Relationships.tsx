@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ArrowLeft, GitMerge, User, Users, ArrowRightLeft, X, Search } from 'lucide-react';
 import { HelpButton, HelpModal } from '../../components/HelpModal';
@@ -9,13 +9,23 @@ import CompareTreesTab from './tabs/CompareTreesTab';
 import { analyzePath } from '../../parser/kinshipLogic';
 
 export default function Relationships() {
-  const { tree, graph, selectedPersonId, setActiveModule } = useApp();
+  const { tree, graph, selectedPersonId, comparePersonId, setActiveModule } = useApp();
   
   // Local state for the module
   const [personAId, setPersonAId] = useState<string | null>(selectedPersonId || null);
-  const [personBId, setPersonBId] = useState<string | null>(null);
+  const [personBId, setPersonBId] = useState<string | null>(comparePersonId || null);
   const [activeTab, setActiveTab] = useState<'path' | 'people' | 'trees'>('path');
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // Sync with global state if it changes
+  useEffect(() => {
+    if (selectedPersonId) setPersonAId(selectedPersonId);
+    if (comparePersonId) {
+      setPersonBId(comparePersonId);
+      // Auto-switch to compare trees when incoming from Duplicate detector
+      setActiveTab('trees');
+    }
+  }, [selectedPersonId, comparePersonId]);
 
   const personA = personAId ? tree?.persons.get(personAId) : null;
   const personB = personBId ? tree?.persons.get(personBId) : null;
@@ -51,58 +61,45 @@ export default function Relationships() {
   return (
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12">
       
-      {/* Header */}
-      <div className="section-header mb-2">
-        <div>
-          <h2 className="section-title">Srodstva i usporedbe</h2>
-          <p className="section-subtitle">Pronađite poveznicu između osoba, usporedite njihove živote ili stabla</p>
+      {/* --- STICKY HEADER KONTEJNER --- */}
+      <div className="sticky top-0 z-40 bg-slate-50/95 backdrop-blur-md pt-2 pb-4">
+        {/* Top Navigation */}
+        <div className="flex flex-col md:flex-row justify-end items-start md:items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+          
+          {/* Tab Toggles */}
+          <div className="flex bg-slate-100/80 p-1.5 rounded-xl border border-slate-200 overflow-x-auto custom-scrollbar w-full md:w-auto">
+            <button 
+              onClick={() => setActiveTab('path')}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+                activeTab === 'path' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <GitMerge size={16} className="-rotate-90" /> Pronađi poveznicu
+            </button>
+            <button 
+              onClick={() => setActiveTab('people')}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+                activeTab === 'people' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <User size={16} /> Usporedi osobe
+            </button>
+            <button 
+              onClick={() => setActiveTab('trees')}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+                activeTab === 'trees' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Users size={16} /> Usporedi stabla
+            </button>
+          </div>
+
         </div>
-      </div>
-
-      {/* Top Navigation */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-[var(--border-color)]">
-        
-        {/* Back Button */}
-        <button 
-          onClick={() => setActiveModule('overview')}
-          className="btn btn-ghost text-[var(--text-secondary)] hover:text-[var(--text-primary)] pl-2"
-        >
-          <ArrowLeft size={18} /> Natrag
-        </button>
-
-        {/* Tab Toggles */}
-        <div className="flex bg-slate-100/80 p-1.5 rounded-xl border border-slate-200 overflow-x-auto custom-scrollbar w-full md:w-auto">
-          <button 
-            onClick={() => setActiveTab('path')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-              activeTab === 'path' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <GitMerge size={16} className="-rotate-90" /> Pronađi poveznicu
-          </button>
-          <button 
-            onClick={() => setActiveTab('people')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-              activeTab === 'people' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <User size={16} /> Usporedi osobe
-          </button>
-          <button 
-            onClick={() => setActiveTab('trees')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-              activeTab === 'trees' ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Users size={16} /> Usporedi stabla
-          </button>
-        </div>
-
       </div>
 
       {/* Person Selection Bar */}
-      <div className="bg-white">
-        <div className="flex flex-col lg:flex-row items-end gap-4 lg:gap-8 max-w-4xl">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex flex-col lg:flex-row items-end gap-4 lg:gap-8 max-w-4xl mx-auto">
           
           <div className="w-full flex-1">
             <div className="text-[11px] font-bold tracking-widest uppercase text-slate-500 mb-2 ml-1">

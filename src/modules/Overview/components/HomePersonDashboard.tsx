@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useApp } from '../../../context/AppContext';
 import AncestorMap from '../../AncestorMap/AncestorMap';
-import FanChartTab from '../../FanChart/FanChartTab';
+import SimpleOverviewFanChart from './SimpleOverviewFanChart';
 import { MapPin, Users, Globe2 } from 'lucide-react';
 
 export default function HomePersonDashboard() {
@@ -97,8 +97,8 @@ export default function HomePersonDashboard() {
         {/* Right Column: Sunburst Chart */}
         <div className="bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-gray-200 dark:border-slate-800 shadow-sm relative min-h-[780px] flex flex-col items-center justify-center hover:border-brand-300 transition-colors h-full">
             <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 mt-4 text-center uppercase tracking-widest absolute top-0 w-full z-10 pointer-events-none">Stablo predaka (Sunburst)</h4>
-            <div className="w-full h-full pt-10 px-2 pb-2 min-h-[780px]">
-                <FanChartTab mini={true} maxGenerations={2} colorMode="generation" />
+            <div className="w-full h-full pt-10 px-2 pb-2 min-h-[780px] flex items-center justify-center">
+                <SimpleOverviewFanChart />
             </div>
         </div>
 

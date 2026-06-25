@@ -27,6 +27,7 @@ export interface GedcomEvent {
   value?: string;        // Free-form value
   note?: string;
   source?: string;
+  godparents?: string[]; // GODP, _GODP, SPON, WITN
 }
 
 export interface GedcomName {
@@ -195,11 +196,12 @@ export interface GeoTreeFeature {
   properties: {
     personId: string;
     fullName: string;
-    eventType: 'BIRT' | 'DEAT' | 'MARR' | 'RESI' | 'MIGR' | 'OTHER';
+    eventType: string;
     year: number;
     description: string;
     avatarUrl?: string;
     branch?: 'Paternal' | 'Maternal' | 'Both';
+    place?: string;
   };
 }
 

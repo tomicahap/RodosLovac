@@ -21,10 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'lifespans', label: 'Životni vijekovi', icon: <Icon d="M3 3v18h18M7 16l4-4 4 4 4-8" />, group: 'Ljudi i analiza' },
   { id: 'fan-chart', label: 'Grafovi', icon: <Icon d="M12 2a10 10 0 1 0 10 10" />, group: 'Ljudi i analiza' },
   // Maps & Discovery
-  { id: 'ancestor-map', label: 'Karta predaka', icon: <Icon d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />, group: 'Karte i otkrića' },
-  { id: 'surname-map', label: 'Karta prezimena', icon: <Icon d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />, group: 'Karte i otkrića' },
-  { id: 'migration-map', label: 'Karta migracija', icon: <Icon d="M5 12h14M12 5l7 7-7 7" />, group: 'Karte i otkrića' },
-  { id: 'census-map', label: 'Popisna karta', icon: <Icon d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13V7m0 13l6-3M9 7l6-3m0 16V4m0 13 5.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-1.447-.894L15 4" />, group: 'Karte i otkrića' },
+  { id: 'maps', label: 'Karte', icon: <Icon d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />, group: 'Karte i otkrića' },
   { id: 'on-this-day', label: 'Na ovaj dan', icon: <Icon d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />, group: 'Karte i otkrića' },
   // Research & Export
   { id: 'research', label: 'Istraživanje', icon: <Icon d="M10 21h7a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v11m0 5-4.879-4.879c-.781-.781-.781-2.048 0-2.828L15 9" />, group: 'Istraživanje i izvoz' },

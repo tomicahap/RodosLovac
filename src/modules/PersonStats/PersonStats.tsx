@@ -72,57 +72,40 @@ export default function PersonStats() {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12 relative">
-      {/* Header */}
-      <div className="section-header mb-2 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="section-title">Dubinska statistika pojedinca</h2>
-          <p className="section-subtitle">Pregled detaljne statistike, ekstremnih zapisa i matrice srodstava</p>
-        </div>
-      </div>
-
       {/* Controls */}
-      <div className="card p-4 flex flex-col md:flex-row gap-6">
-        <div className="flex-1 max-w-sm">
-          <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-            Odabrana (fokalna) osoba
+      {deepStats && deepStats.absoluteMaxGenerations > 0 && mainTab === 'osoba' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-6">
+          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            Prikaz kroz generacije (utječe na statistike ispod)
           </label>
-          <PersonSearch className="w-full" />
-        </div>
-        
-        {deepStats && deepStats.absoluteMaxGenerations > 0 && mainTab === 'osoba' && (
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-              Prikaz kroz generacije
-            </label>
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setMaxGenerations(100)}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+                maxGenerations === 100 ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Sve
+            </button>
+            {Array.from({ length: deepStats.absoluteMaxGenerations }, (_, i) => i + 1).map(gen => (
               <button
-                onClick={() => setMaxGenerations(100)}
-                className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
-                  maxGenerations === 100 ? 'bg-teal-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                key={gen}
+                onClick={() => setMaxGenerations(gen)}
+                className={`px-3 py-2 rounded-xl text-sm font-bold transition-colors ${
+                  maxGenerations === gen ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                Sve
+                G{gen}
               </button>
-              {Array.from({ length: deepStats.absoluteMaxGenerations }, (_, i) => i + 1).map(gen => (
-                <button
-                  key={gen}
-                  onClick={() => setMaxGenerations(gen)}
-                  className={`px-3 py-2 rounded-xl text-sm font-bold transition-colors ${
-                    maxGenerations === gen ? 'bg-teal-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  G{gen}
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {!person || !deepStats ? (
-        <div className="card p-8 text-center text-[var(--text-muted)]">
+        <div className="bg-white rounded-2xl p-8 text-center text-slate-400 border border-slate-200 shadow-sm">
           <p className="text-4xl mb-3">👤</p>
-          <p className="font-medium">Odaberite osobu za prikaz statistike</p>
+          <p className="font-medium">Odaberite osobu za prikaz statistike (u zaglavlju)</p>
         </div>
       ) : (
         <>
@@ -162,33 +145,11 @@ export default function PersonStats() {
 
           {mainTab === 'osoba' && (
             <div className="space-y-6 animate-fade-in">
-              {/* Person Title Card */}
-              <div className="card p-5">
-                <div className="flex flex-col md:flex-row items-start gap-6">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-3xl flex-shrink-0 ${
-                    person.sex === 'M' ? 'bg-blue-500/10' : person.sex === 'F' ? 'bg-pink-500/10' : 'bg-gray-500/10'
-                  }`}>
-                    {person.sex === 'M' ? '♂' : person.sex === 'F' ? '♀' : '?'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-2xl font-black text-[var(--text-primary)] mb-1">{person.names[0]?.full}</h3>
-                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-[var(--text-secondary)]">
-                      {person.birth?.date?.display && (
-                        <span className="flex items-center gap-1.5"><span className="text-gray-400">Rođen/a:</span> <strong>{person.birth.date.display}</strong>{person.birth.place ? `, ${person.birth.place.split(',')[0]}` : ''}</span>
-                      )}
-                      {person.death?.date?.display && (
-                        <span className="flex items-center gap-1.5"><span className="text-gray-400">Umro/la:</span> <strong>{person.death.date.display}</strong>{person.death.place ? `, ${person.death.place.split(',')[0]}` : ''}</span>
-                      )}
-                      <span className="text-slate-300 hidden sm:inline">|</span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-gray-400">Generacije:</span>
-                        <strong>gore (predci) {ancestorDepth}</strong>
-                        <span className="text-gray-400">/</span>
-                        <strong>dolje (potomci) {descendantDepth}</strong>
-                      </span>
-                    </div>
-                  </div>
-                  <div className="w-full md:w-1/2 lg:w-auto flex flex-col gap-3 flex-shrink-0 bg-slate-50 p-4 rounded-xl border border-gray-100">
+              {/* Person Title Card -> Stablo na prvi pogled */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 mb-6">
+                <div className="flex flex-col gap-4">
+                  <h3 className="text-lg font-black text-slate-700">Stablo na prvi pogled (u krugu do G{maxGenerations === 100 ? deepStats.absoluteMaxGenerations : maxGenerations})</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     
                     <div className="flex flex-col">
                       <div className="flex items-baseline gap-2">

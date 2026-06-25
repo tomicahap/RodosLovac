@@ -1,5 +1,6 @@
 import { GedcomTree, GedcomPerson } from '../parser/gedcomTypes';
 import { TreeGraph } from '../parser/treeGraph';
+import { getCountryFromPlace } from './countryHelper';
 
 export interface ExtremeRecord {
   id: string;
@@ -268,7 +269,7 @@ export function computePersonDeepStats(personId: string, tree: GedcomTree, graph
   for (const ancId of ancestors.keys()) {
     const anc = tree.persons.get(ancId);
     if (anc?.birth?.place) {
-       ancCountries.set(ancId, anc.birth.place.split(',').pop()?.trim() || '');
+       ancCountries.set(ancId, getCountryFromPlace(anc.birth.place));
     }
   }
 

@@ -14,7 +14,7 @@ export default function AppHeader() {
     { id: 'person-stats', label: 'Statistika', icon: <Users size={16} /> },
     { id: 'relationships', label: 'Srodnost', icon: <Activity size={16} /> },
     { id: 'fan-chart', label: 'Grafovi', icon: <BarChart3 size={16} /> },
-    { id: 'ancestor-map', label: 'Karte', icon: <Map size={16} /> },
+    { id: 'maps', label: 'Karte', icon: <Map size={16} /> },
     { id: 'lifespans', label: 'Životni vijek', icon: <Activity size={16} /> },
     { id: 'on-this-day', label: 'Na današnji dan', icon: <Calendar size={16} /> },
     { id: 'research', label: 'Istraživanje', icon: <Search size={16} /> },
@@ -95,64 +95,24 @@ export default function AppHeader() {
             </ul>
           </div>
         );
-      case 'ancestor-map':
+      case 'maps':
         return (
           <div className="space-y-4">
             <p>
-              Modul <strong>GIS Geogenealogija</strong> je interaktivna karta koja geografski i vremenski vizualizira podatke o vašim precima.
+              Modul <strong>Karte</strong> je središnje mjesto za geografsku vizualizaciju vaših predaka.
             </p>
-            <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Slojevi karte (gore desno):</h4>
+            <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Dostupne karte:</h4>
             <ul className="list-disc pl-5 space-y-2 text-xs">
-              <li><strong>Klasteri (Clusters):</strong> Grupira markere bliskih lokacija radi bolje preglednosti. Klikom na krug otvara se popis osoba.</li>
-              <li><strong>Toplinska karta (Heatmap):</strong> Prikazuje gustoću rođenja i boravka predaka na određenim prostorima.</li>
-              <li><strong>Migracijski tokovi:</strong> Crta animirane linije od mjesta rođenja do mjesta smrti predaka.</li>
-              <li><strong>Vremenska crta:</strong> Klizač na dnu filtrira i animira (Play) kretanje predaka kroz stoljeća.</li>
+              <li><strong>Karta predaka:</strong> Prikazuje mjesta rođenja i života vaših predaka uz pomoć klastera i toplinskih karti.</li>
+              <li><strong>Karta potomaka:</strong> Geografski prikaz raseljenosti obitelji (u izradi).</li>
+              <li><strong>Karta prezimena:</strong> Praćenje geografskog porijekla i migracija nositelja pojedinog prezimena.</li>
+              <li><strong>Karta migracija:</strong> Rute preseljenja predaka (od rođenja do smrti) uz vremensku animaciju.</li>
+              <li><strong>Popisna karta:</strong> Lokacije predaka s obzirom na godine popisa stanovništva.</li>
+              <li><strong>Mjesta:</strong> Abecedni indeks svih mjesta (u izradi).</li>
             </ul>
           </div>
         );
-      case 'surname-map':
-        return (
-          <div className="space-y-4">
-            <p>
-              Modul <strong>Karta prezimena</strong> omogućuje praćenje geografskog porijekla i migracija nositelja pojedinog prezimena u vašem stablu.
-            </p>
-            <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Kako koristiti:</h4>
-            <ul className="list-disc pl-5 space-y-2 text-xs">
-              <li><strong>Odabir prezimena:</strong> Izbornik prikazuje sva prezimena poredana po broju osoba.</li>
-              <li><strong>Filter stoljeća:</strong> Omogućuje vam da vidite gdje su se osobe s odabranim prezimenom rađale u određenom stoljeću (npr. 1800-ih).</li>
-              <li><strong>Veličina kruga:</strong> Što je krug na karti veći, to je više osoba s tim prezimenom rođeno na toj lokaciji.</li>
-            </ul>
-          </div>
-        );
-      case 'migration-map':
-        return (
-          <div className="space-y-4">
-            <p>
-              Modul <strong>Karta migracija</strong> prikazuje rute preseljenja vaših predaka od rođenja do smrti ili boravišta.
-            </p>
-            <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Kazalo boja:</h4>
-            <ul className="list-none pl-1 space-y-1 text-xs">
-              <li><span className="w-6 h-0.5 bg-[#608bff] inline-block mr-2"></span> Plavo: Rođenje → Smrt</li>
-              <li><span className="w-6 h-0.5 bg-[#f59e0b] inline-block mr-2"></span> Žuto: Događaj prebivanja (Residence)</li>
-              <li><span className="w-6 h-0.5 bg-[#10b981] inline-block mr-2"></span> Zeleno: Imigracija (Immigration)</li>
-              <li><strong>Animacija:</strong> Kliknite na gumb <strong>▶ Animiraj</strong> kako biste gledali vremenski slijed selidbi kroz godine.</li>
-            </ul>
-          </div>
-        );
-      case 'census-map':
-        return (
-          <div className="space-y-4">
-            <p>
-              Modul <strong>Popisna karta</strong> prikazuje lokacije prebivališta predaka u točno određenoj godini, što olakšava pretraživanje povijesnih popisa stanovništva (Census).
-            </p>
-            <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Značajke:</h4>
-            <ul className="list-disc pl-5 space-y-2 text-xs">
-              <li><strong>Brzi odabir popisa:</strong> Gumbi na vrhu preusmjeravaju na službene godine popisa (od 1790. do 1950.).</li>
-              <li><strong>Tolerancija godina:</strong> Prikazuje boravišta unutar npr. ± 5 godina od ciljane godine popisa.</li>
-              <li><strong>Kazalo boja:</strong> Zeleni kružići su službeni popisi (CENS), žuti su boravišta (RESI), a plavi su rođenja (BIRT) u tom razdoblju.</li>
-            </ul>
-          </div>
-        );
+
       case 'on-this-day':
         return (
           <div className="space-y-4">
@@ -265,10 +225,6 @@ export default function AppHeader() {
             </button>
           )}
           
-          <button className="btn btn-ghost p-2" title="Postavke">
-            <Settings size={18} />
-          </button>
-
           <button className="btn btn-ghost p-2" onClick={toggleTheme} title="Promijeni temu">
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
@@ -278,6 +234,10 @@ export default function AppHeader() {
               <X size={18} />
             </button>
           )}
+
+          <button onClick={() => window.print()} className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 text-xs font-bold transition-colors ml-2" title="Spremi trenutnu stranicu kao PDF ili Ispis">
+            <Download size={14} /> Spremi PDF
+          </button>
 
           <button 
             className="w-8 h-8 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 shadow-md flex items-center justify-center transition-all hover:scale-105 duration-200 ml-1 animate-pulse-subtle" 

@@ -17,9 +17,10 @@ const PLACE_CENTROIDS: Record<string, [number, number]> = {
   'asia': [40, 90],
   'australia': [-25, 133],
 
-  // Countries
+  // Countries & Historical Entities
   'croatia': [45.1, 15.2],
   'hrvatska': [45.1, 15.2],
+  'kroatien': [45.1, 15.2],
   'slovenia': [46.1, 14.8],
   'slovenija': [46.1, 14.8],
   'bosnia': [44.0, 17.5],
@@ -27,6 +28,16 @@ const PLACE_CENTROIDS: Record<string, [number, number]> = {
   'bosna i hercegovina': [44.0, 17.5],
   'serbia': [44.0, 21.0],
   'srbija': [44.0, 21.0],
+  'yugoslavia': [44.0, 21.0],
+  'jugoslavija': [44.0, 21.0],
+  'austro-hungarian empire': [47.5, 14.5],
+  'austria-hungary': [47.5, 14.5],
+  'habsburg empire': [48.2, 16.3],
+  'austrian empire': [48.2, 16.3],
+  'slavonia': [45.5, 18.2],
+  'slavonija': [45.5, 18.2],
+  'dalmatia': [43.8, 16.0],
+  'dalmacija': [43.8, 16.0],
   'germany': [51.2, 10.5],
   'deutschland': [51.2, 10.5],
   'austria': [47.5, 14.5],

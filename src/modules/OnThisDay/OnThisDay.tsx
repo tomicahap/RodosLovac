@@ -4,327 +4,407 @@
 
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import type { GedcomPerson } from '../../parser/gedcomTypes';
-import { HelpButton, HelpModal } from '../../components/HelpModal';
-
-interface DayEvent {
-  type: 'birth' | 'death' | 'marriage' | 'anniversary' | 'other';
-  person: GedcomPerson;
-  year?: number;
-  age?: number;
-  yearsAgo?: number;
-  place?: string;
-  description: string;
-}
+import { ChevronDown, ChevronRight, ChevronLeft, Download, FileSpreadsheet } from 'lucide-react';
 
 const MONTH_NAMES = ['', 'Siječanj', 'Veljača', 'Ožujak', 'Travanj', 'Svibanj', 'Lipanj',
   'Srpanj', 'Kolovoz', 'Rujan', 'Listopad', 'Studeni', 'Prosinac'];
 
-const EVENT_ICONS: Record<DayEvent['type'], string> = {
-  birth: '🎂',
-  death: '✝',
-  marriage: '💍',
-  anniversary: '💑',
-  other: '📅',
-};
 
-const EVENT_COLORS: Record<DayEvent['type'], string> = {
-  birth: 'badge-green',
-  death: 'badge-gray',
-  marriage: 'badge-brand',
-  anniversary: 'badge-purple',
-  other: 'badge-amber',
-};
 
-const EVENT_LABELS: Record<DayEvent['type'], string> = {
-  birth: 'Рођendan',
-  death: 'Godišnjica smrti',
-  marriage: 'Dan vjenčanja',
-  anniversary: 'Godišnjica',
-  other: 'Događaj',
-};
-
-// ─── Hebrew calendar (simplified conversion) ─────────────────
-
-const HEBREW_MONTHS = ['', 'Tišri', 'Hešvan', 'Kislev', 'Tevet', 'Švat', 'Adar', 'Nisan',
-  'Ijar', 'Sivan', 'Tamuz', 'Av', 'Elul'];
-
-function getHebrewDate(date: Date): string {
-  // Approximate Hebrew date conversion (Gregorian → Hebrew)
-  // This is a simplified approximation, not a full calendar conversion
-  const jdn = date.getTime() / 86400000 + 2440587.5; // Julian Day Number
-  const year = Math.floor((jdn - 347996.5) / 365.25) + 1;
-  const months = Math.floor(((jdn - 347996.5) % 365.25) / 29.53);
-  return `${HEBREW_MONTHS[Math.min(months + 1, 13)] || ''} ${Math.round(jdn % 29.5) + 1}, ${year + 3760}`;
+interface EventItem {
+  id: string;
+  type: 'birth' | 'death' | 'marriage';
+  year?: number;
+  yearsAgo?: number;
+  isDeceased?: boolean;
+  ageAtDeath?: number;
+  ageIfAlive?: number;
+  currentAge?: number;
+  age?: number;
+  husbandName?: string;
+  wifeName?: string;
+  place?: string;
+  personName?: string;
+  sex?: 'M' | 'F' | 'U' | 'X';
 }
 
-// ─── Main Component ─────────────────────────────────────────
+function exportToCSV(filename: string, rows: string[][]) {
+  const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
+    + rows.map(e => e.join(";")).join("\n");
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
 export default function OnThisDay() {
   const { tree } = useApp();
-  const [helpOpen, setHelpOpen] = useState(false);
-  const today = new Date();
-  const [selectedDate, setSelectedDate] = useState<{ month: number; day: number }>({
-    month: today.getMonth() + 1,
-    day: today.getDate(),
-  });
-  const [showHebrewDate, setShowHebrewDate] = useState(false);
-  const [filterType, setFilterType] = useState<DayEvent['type'] | 'all'>('all');
-  const currentYear = today.getFullYear();
+  const [currentDate, setCurrentDate] = useState(new Date());
+  
 
-  const events = useMemo((): DayEvent[] => {
-    if (!tree) return [];
-    const { month, day } = selectedDate;
-    const result: DayEvent[] = [];
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    birthdays: true,
+    passings: true,
+    anniversaries: true
+  });
+
+  const toggleSection = (sec: string) => {
+    setExpandedSections(prev => ({ ...prev, [sec]: !prev[sec] }));
+  };
+  const expandAll = () => setExpandedSections({ birthdays: true, passings: true, anniversaries: true });
+
+  const goPrevDay = () => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() - 1);
+    setCurrentDate(d);
+  };
+  const goNextDay = () => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() + 1);
+    setCurrentDate(d);
+  };
+
+  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const m = parseInt(e.target.value);
+    const d = new Date(currentDate);
+    d.setMonth(m - 1);
+    setCurrentDate(d);
+  };
+  
+  const handleDayChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = parseInt(e.target.value);
+    const d = new Date(currentDate);
+    d.setDate(val);
+    setCurrentDate(d);
+  };
+
+  const isToday = () => {
+    const t = new Date();
+    return t.getDate() === currentDate.getDate() && t.getMonth() === currentDate.getMonth();
+  };
+
+  const { birthdays, passings, anniversaries } = useMemo(() => {
+    const b: EventItem[] = [];
+    const p: EventItem[] = [];
+    const a: EventItem[] = [];
+    if (!tree) return { birthdays: b, passings: p, anniversaries: a };
+
+    const cDay = currentDate.getDate();
+    const cMonth = currentDate.getMonth() + 1;
+    const currentYear = new Date().getFullYear();
 
     for (const person of tree.persons.values()) {
       const name = person.names[0]?.full || 'Nepoznato';
+      
+      // BIRTHDAYS
+      if (person.birth?.date && person.birth.date.day === cDay && person.birth.date.month === cMonth) {
+        const bYear = person.birth.date.year;
+        const dYear = person.death?.date?.year;
+        const isDeceased = !!person.death;
+        
+        let ageIfAlive = bYear ? currentYear - bYear : undefined;
+        let currentAge = (!isDeceased && bYear) ? currentYear - bYear : undefined;
+        let ageAtDeath = (isDeceased && bYear && dYear) ? dYear - bYear : undefined;
 
-      // Birthday
-      if (person.birth?.date) {
-        const d = person.birth.date;
-        if (d.month === month && d.day === day) {
-          const year = d.year;
-          const isDeceased = !!person.death?.date?.year;
-          const yearsAgo = year ? currentYear - year : undefined;
-          result.push({
-            type: isDeceased ? 'birth' : 'birth',
-            person,
-            year,
-            yearsAgo,
-            place: person.birth.place,
-            description: isDeceased
-              ? `Rodio/la se ${year ? `${year}. (${yearsAgo} god. temu)` : ''}`
-              : `Proslavljuje ${yearsAgo ? `${yearsAgo}. ` : ''}rođendan`,
-          });
-        }
+        b.push({
+          id: person.id, type: 'birth', personName: name, sex: person.sex,
+          year: bYear, isDeceased, ageIfAlive, currentAge, ageAtDeath
+        });
       }
 
-      // Death anniversary
-      if (person.death?.date) {
-        const d = person.death.date;
-        if (d.month === month && d.day === day) {
-          const year = d.year;
-          result.push({
-            type: 'death',
-            person,
-            year,
-            yearsAgo: year ? currentYear - year : undefined,
-            place: person.death.place,
-            description: `Preminuo/la ${year ? `${year}.` : ''}`,
-          });
-        }
-      }
+      // PASSINGS
+      if (person.death?.date && person.death.date.day === cDay && person.death.date.month === cMonth) {
+        const dYear = person.death.date.year;
+        const bYear = person.birth?.date?.year;
+        const yearsAgo = dYear ? currentYear - dYear : undefined;
+        const age = (bYear && dYear) ? dYear - bYear : undefined;
 
-      // Marriage (from families)
-      for (const famId of person.familiesAsSpouse) {
-        const fam = tree.families.get(famId);
-        if (!fam?.marriage?.date) continue;
-        const d = fam.marriage.date;
-        if (d.month === month && d.day === day) {
-          const year = d.year;
-          const spouseId = fam.husband === person.id ? fam.wife : fam.husband;
-          const spouse = spouseId ? tree.persons.get(spouseId) : undefined;
-          result.push({
-            type: 'marriage',
-            person,
-            year,
-            yearsAgo: year ? currentYear - year : undefined,
-            place: fam.marriage.place,
-            description: `Vjenčanje${spouse ? ` s ${spouse.names[0]?.full}` : ''}`,
-          });
-        }
-      }
-
-      // Other events
-      for (const ev of person.events) {
-        if (!ev.date?.month || !ev.date?.day) continue;
-        if (ev.date.month === month && ev.date.day === day) {
-          result.push({
-            type: 'other',
-            person,
-            year: ev.date.year,
-            yearsAgo: ev.date.year ? currentYear - ev.date.year : undefined,
-            place: ev.place,
-            description: ev.tag === 'BURI' ? 'Pokop' : ev.tag === 'CHR' ? 'Krštenje' : ev.value || ev.tag,
-          });
-        }
+        p.push({
+          id: person.id + '_d', type: 'death', personName: name, sex: person.sex,
+          year: dYear, yearsAgo, age
+        });
       }
     }
 
-    return result.sort((a, b) => (a.year || 9999) - (b.year || 9999));
-  }, [tree, selectedDate, currentYear]);
+    // ANNIVERSARIES
+    for (const fam of tree.families.values()) {
+      if (fam.marriage?.date && fam.marriage.date.day === cDay && fam.marriage.date.month === cMonth) {
+        const mYear = fam.marriage.date.year;
+        const yearsAgo = mYear ? currentYear - mYear : undefined;
+        
+        const husb = fam.husband ? tree.persons.get(fam.husband) : null;
+        const wife = fam.wife ? tree.persons.get(fam.wife) : null;
 
-  const filtered = useMemo(() =>
-    filterType === 'all' ? events : events.filter(e => e.type === filterType),
-    [events, filterType]
-  );
+        a.push({
+          id: fam.id, type: 'marriage',
+          husbandName: husb?.names[0]?.full || 'Nepoznati muž',
+          wifeName: wife?.names[0]?.full || 'Nepoznata žena',
+          year: mYear, yearsAgo,
+          place: fam.marriage.place
+        });
+      }
+    }
 
-  const hebrewDate = useMemo(() => {
-    const d = new Date(currentYear, selectedDate.month - 1, selectedDate.day);
-    return getHebrewDate(d);
-  }, [selectedDate, currentYear]);
+    b.sort((x, y) => (y.year || 0) - (x.year || 0));
+    p.sort((x, y) => (y.year || 0) - (x.year || 0));
+    a.sort((x, y) => (y.year || 0) - (x.year || 0));
 
-  const monthDays = useMemo(() => {
-    const maxDay = new Date(currentYear, selectedDate.month, 0).getDate();
-    return Array.from({ length: maxDay }, (_, i) => i + 1);
-  }, [selectedDate.month, currentYear]);
+    return { birthdays: b, passings: p, anniversaries: a };
+  }, [tree, currentDate]);
 
-  if (!tree) return null;
+  const downloadCSV = (e: React.MouseEvent, type: 'birth'|'death'|'marriage'|'all') => {
+    e.stopPropagation();
+    let rows: string[][] = [];
+    if (type === 'birth' || type === 'all') {
+      rows.push(['KATEGORIJA', 'IME', 'SPOL', 'RODJEN', 'DOB_STATUS']);
+      birthdays.forEach(x => {
+        let status = x.isDeceased ? `Danas bi imao/la ${x.ageIfAlive}` : `Trenutno ima ${x.currentAge}`;
+        if (x.isDeceased && x.ageAtDeath) status += ` (Preminuo/la u ${x.ageAtDeath}. godini)`;
+        rows.push(['Rođendan', x.personName || '', x.sex || '', x.year?.toString() || '', status]);
+      });
+    }
+    if (type === 'death' || type === 'all') {
+      rows.push(['KATEGORIJA', 'IME', 'SPOL', 'UMRO', 'DOB_U_SMRTI', 'PRIJE_GODINA']);
+      passings.forEach(x => {
+        rows.push(['Smrt', x.personName || '', x.sex || '', x.year?.toString() || '', x.age?.toString() || '', x.yearsAgo?.toString() || '']);
+      });
+    }
+    if (type === 'marriage' || type === 'all') {
+      rows.push(['KATEGORIJA', 'MUZ', 'ZENA', 'VJENCANI', 'LOKACIJA', 'PRIJE_GODINA']);
+      anniversaries.forEach(x => {
+        rows.push(['Godišnjica', x.husbandName || '', x.wifeName || '', x.year?.toString() || '', x.place || '', x.yearsAgo?.toString() || '']);
+      });
+    }
+    exportToCSV(`na_danasnji_dan_${type}.csv`, rows);
+  };
+
+  const getDaysInMonth = (m: number) => new Date(2024, m, 0).getDate();
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="section-header">
-        <div>
-          <h2 className="section-title">Na ovaj dan</h2>
-          <p className="section-subtitle">Događaji u obiteljskom stablu koji se podudaraju s odabranim danom</p>
-        </div>
-      </div>
+    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12">
+      
+      {/* KRONOLOŠKA UPRAVLJAČKA PLOČA */}
+      <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200 text-center relative overflow-hidden flex flex-col items-center">
+        {/* Dekorativna pozadina */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-teal-50 rounded-full blur-3xl opacity-50 pointer-events-none -mr-20 -mt-20"></div>
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 pointer-events-none -ml-20 -mb-20"></div>
 
-      {/* Date picker */}
-      <div className="card p-5">
-        <div className="flex flex-wrap gap-4 items-center">
-          <div className="flex items-center gap-3">
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Mjesec</label>
-              <select className="input w-36" value={selectedDate.month}
-                onChange={e => setSelectedDate(d => ({ ...d, month: Number(e.target.value), day: 1 }))}>
-                {MONTH_NAMES.slice(1).map((m, i) => (
-                  <option key={i + 1} value={i + 1}>{m}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Dan</label>
-              <select className="input w-24" value={selectedDate.day}
-                onChange={e => setSelectedDate(d => ({ ...d, day: Number(e.target.value) }))}>
-                {monthDays.map(d => <option key={d} value={d}>{d}.</option>)}
-              </select>
-            </div>
-            <button className="btn btn-secondary mt-4"
-              onClick={() => setSelectedDate({ month: today.getMonth() + 1, day: today.getDate() })}>
-              Danas
-            </button>
+        {isToday() && (
+          <span className="text-teal-600 font-black tracking-widest uppercase text-xs mb-3 bg-teal-50 px-3 py-1 rounded-full relative z-10">
+            Danas
+          </span>
+        )}
+
+        <div className="flex items-center justify-center gap-6 relative z-10 w-full mb-2">
+          <button onClick={goPrevDay} className="w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center hover:bg-slate-50 transition-colors text-slate-500 hover:text-slate-700 shadow-sm">
+            <ChevronLeft size={24} />
+          </button>
+          
+          <div className="flex flex-col items-center min-w-[280px]">
+            <h2 className="text-4xl md:text-5xl font-black text-slate-800 tabular-nums tracking-tight">
+              {currentDate.getDate()}. {MONTH_NAMES[currentDate.getMonth() + 1].toLowerCase()} {currentDate.getFullYear()}.
+            </h2>
+
           </div>
 
-          <div className="border-l border-[var(--border-color)] pl-4">
-            <p className="text-lg font-bold text-[var(--text-primary)]">
-              {selectedDate.day}. {MONTH_NAMES[selectedDate.month]}
-            </p>
-            {showHebrewDate && (
-              <p className="text-sm text-[var(--text-muted)] mt-0.5">🕎 {hebrewDate}</p>
-            )}
-            <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] mt-1 cursor-pointer">
-              <input type="checkbox" checked={showHebrewDate} onChange={e => setShowHebrewDate(e.target.checked)} />
-              Prikaži hebrejski datum
-            </label>
+          <button onClick={goNextDay} className="w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center hover:bg-slate-50 transition-colors text-slate-500 hover:text-slate-700 shadow-sm">
+            <ChevronRight size={24} />
+          </button>
+        </div>
+
+        {/* Kontrole ispod */}
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-6 relative z-10">
+
+
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl">
+            <span className="text-xs font-bold text-slate-400 uppercase">Idi na</span>
+            <select value={currentDate.getMonth() + 1} onChange={handleMonthChange} className="bg-transparent font-bold text-sm text-slate-700 outline-none cursor-pointer border-r border-slate-200 pr-2">
+              {MONTH_NAMES.slice(1).map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+            </select>
+            <select value={currentDate.getDate()} onChange={handleDayChange} className="bg-transparent font-bold text-sm text-slate-700 outline-none cursor-pointer pl-1">
+              {Array.from({length: getDaysInMonth(currentDate.getMonth() + 1)}, (_, i) => i+1).map(d => <option key={d} value={d}>{d}.</option>)}
+            </select>
           </div>
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex flex-wrap gap-2">
-        {(['all', 'birth', 'death', 'marriage', 'other'] as const).map(type => {
-          const count = type === 'all' ? events.length : events.filter(e => e.type === type).length;
-          return (
-            <button key={type} onClick={() => setFilterType(type)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
-                filterType === type
-                  ? 'bg-[var(--brand-light)] border-[var(--brand-color)] text-[var(--brand-color)]'
-                  : 'border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--text-muted)]'
-              }`}>
-              {type === 'all' ? '🗓' : EVENT_ICONS[type]}
-              {type === 'all' ? 'Svi' : EVENT_LABELS[type]}
-              {count > 0 && <span className="font-semibold">({count})</span>}
-            </button>
-          );
-        })}
+      {/* GLOBALNE KONTROLE ACCORDIONA */}
+      <div className="flex justify-between items-center px-2">
+        <button onClick={expandAll} className="text-slate-500 font-bold text-sm hover:text-slate-800 transition-colors">
+          ▼ Raširi sve
+        </button>
+        <button onClick={(e) => downloadCSV(e, 'all')} className="flex items-center gap-2 text-teal-600 bg-teal-50 px-4 py-2 rounded-xl font-bold text-sm hover:bg-teal-100 transition-colors">
+          <Download size={16} /> Preuzmi sve
+        </button>
       </div>
 
-      {/* Events list */}
-      {filtered.length === 0 ? (
-        <div className="card p-12 text-center">
-          <div className="text-4xl mb-3">📅</div>
-          <p className="font-medium text-[var(--text-primary)]">Nema događaja na ovaj dan</p>
-          <p className="text-sm text-[var(--text-muted)] mt-1">
-            Odaberi drugi datum ili dodaj više datuma u GEDCOM datoteku
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filtered.map((ev, i) => (
-            <div key={i} className="card p-4 flex gap-4 items-start hover:border-[var(--brand-color)] transition-colors">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${
-                ev.type === 'birth' ? 'bg-green-500/10' :
-                ev.type === 'death' ? 'bg-gray-500/10' :
-                ev.type === 'marriage' ? 'bg-blue-500/10' : 'bg-amber-500/10'
-              }`}>
-                {EVENT_ICONS[ev.type]}
+      {/* ACCORDIONI */}
+      <div className="space-y-4">
+        
+        {/* ROĐENDANI */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+          <button 
+            onClick={() => toggleSection('birthdays')}
+            className="w-full flex items-center justify-between p-6 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <span className="text-3xl">🎂</span>
+              <div className="text-left">
+                <h3 className="font-black text-xl text-slate-800 uppercase tracking-wide">Rođendani</h3>
+                <p className="text-sm text-slate-400 font-bold">{birthdays.length} {birthdays.length === 1 ? 'osoba' : 'osoba'}</p>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-[var(--text-primary)]">{ev.person.names[0]?.full}</span>
-                  <span className={`badge ${EVENT_COLORS[ev.type]}`}>{EVENT_LABELS[ev.type]}</span>
-                  {ev.year && <span className="text-sm text-[var(--text-muted)]">{ev.year}</span>}
-                  {ev.yearsAgo !== undefined && ev.yearsAgo > 0 && (
-                    <span className="text-xs text-[var(--text-muted)]">({ev.yearsAgo} god. temu)</span>
-                  )}
+            </div>
+            <div className="flex items-center gap-4">
+              <div 
+                onClick={(e) => downloadCSV(e, 'birth')}
+                className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors cursor-pointer text-sm font-bold"
+              >
+                <FileSpreadsheet size={16} /> Excel
+              </div>
+              {expandedSections.birthdays ? <ChevronDown className="text-slate-400" /> : <ChevronRight className="text-slate-400" />}
+            </div>
+          </button>
+          
+          {expandedSections.birthdays && birthdays.length > 0 && (
+            <div className="px-6 pb-6 pt-2 bg-slate-50 border-t border-slate-100 space-y-2">
+              {birthdays.map((b, i) => (
+                <div key={b.id + i} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${b.sex === 'M' ? 'bg-blue-50 text-blue-500' : b.sex === 'F' ? 'bg-pink-50 text-pink-500' : 'bg-slate-100 text-slate-400'}`}>
+                      {b.sex === 'M' ? '♂' : b.sex === 'F' ? '♀' : '?'}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800">{b.personName}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
+                        {b.isDeceased ? (
+                          <>Danas bi imao/la <span className="font-bold">{b.ageIfAlive || '?'}</span> {b.ageAtDeath ? <span className="text-xs ml-1 opacity-70">(Preminuo/la u {b.ageAtDeath}. godini)</span> : ''}</>
+                        ) : (
+                          <>Trenutno ima <span className="font-bold">{b.currentAge || '?'}</span> god.</>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-teal-600 font-bold">Rođen/a {b.year || '?'}</div>
+                  </div>
                 </div>
-                <p className="text-sm text-[var(--text-secondary)] mt-0.5">{ev.description}</p>
-                {ev.place && <p className="text-xs text-[var(--text-muted)] mt-0.5">📍 {ev.place}</p>}
-              </div>
-              <div className={`text-xs text-right flex-shrink-0 ${
-                ev.person.sex === 'M' ? 'gender-m' : ev.person.sex === 'F' ? 'gender-f' : 'gender-u'
-              }`}>
-                {ev.person.sex === 'M' ? '♂' : ev.person.sex === 'F' ? '♀' : '?'}
+              ))}
+            </div>
+          )}
+          {expandedSections.birthdays && birthdays.length === 0 && (
+            <div className="px-6 pb-6 text-center text-slate-400 text-sm italic border-t border-slate-100 pt-6">Nema zabilježenih rođendana na ovaj datum.</div>
+          )}
+        </div>
+
+        {/* SMRTI */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+          <button 
+            onClick={() => toggleSection('passings')}
+            className="w-full flex items-center justify-between p-6 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <span className="text-3xl">🕊️</span>
+              <div className="text-left">
+                <h3 className="font-black text-xl text-slate-800 uppercase tracking-wide">Smrti</h3>
+                <p className="text-sm text-slate-400 font-bold">{passings.length} {passings.length === 1 ? 'osoba' : 'osoba'}</p>
               </div>
             </div>
-          ))}
+            <div className="flex items-center gap-4">
+              <div 
+                onClick={(e) => downloadCSV(e, 'death')}
+                className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors cursor-pointer text-sm font-bold"
+              >
+                <FileSpreadsheet size={16} /> Excel
+              </div>
+              {expandedSections.passings ? <ChevronDown className="text-slate-400" /> : <ChevronRight className="text-slate-400" />}
+            </div>
+          </button>
+          
+          {expandedSections.passings && passings.length > 0 && (
+            <div className="px-6 pb-6 pt-2 bg-slate-50 border-t border-slate-100 space-y-2">
+              {passings.map((p, i) => (
+                <div key={p.id + i} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${p.sex === 'M' ? 'bg-blue-50 text-blue-500' : p.sex === 'F' ? 'bg-pink-50 text-pink-500' : 'bg-slate-100 text-slate-400'}`}>
+                      {p.sex === 'M' ? '♂' : p.sex === 'F' ? '♀' : '?'}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800">{p.personName}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
+                        Umro/la {p.year || '?'} · Dob: {p.age || '?'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-slate-400 font-bold">{p.yearsAgo ? `Prije ${p.yearsAgo} god.` : ''}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {expandedSections.passings && passings.length === 0 && (
+            <div className="px-6 pb-6 text-center text-slate-400 text-sm italic border-t border-slate-100 pt-6">Nema zabilježenih smrti na ovaj datum.</div>
+          )}
         </div>
-      )}
 
-      <HelpModal 
-        isOpen={helpOpen} 
-        onClose={() => setHelpOpen(false)} 
-        title="Na ovaj dan"
-      >
-        <div className="space-y-4">
-          <p>
-            Modul <strong>Na ovaj dan</strong> omogućuje vam pretraživanje i otkrivanje povijesnih događaja u vašoj obitelji (rođenja, vjenčanja, smrti, pokopi, krštenja) koji su se dogodili na točno odabrani dan i mjesec u godini.
-          </p>
-          <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Kako koristiti modul:</h4>
-          <ul className="list-disc pl-5 space-y-2 text-xs">
-            <li>
-              <strong>Odabir datuma:</strong> Pomoću padajućih izbornika odaberite mjesec i dan. Aplikacija će automatski pretražiti stablo i izdvojiti sve događaje koji su se dogodili na taj dan kroz povijest.
-            </li>
-            <li>
-              <strong>Hebrejski kalendar:</strong> Uključivanjem opcije prikazuje se približan ekvivalent datuma u hebrejskom (židovskom) kalendaru.
-            </li>
-            <li>
-              <strong>Filtriranje:</strong> Filtrirajte rezultate prema rođendanima, godišnjicama smrti, vjenčanjima ili ostalim događajima.
-            </li>
-          </ul>
-          <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-1 mt-3">Ikone i boje događaja:</h4>
-          <ul className="list-none pl-1 space-y-1.5 text-xs">
-            <li className="flex items-center gap-2">
-              <span className="text-sm">🎂</span>
-              <strong>Rođendani:</strong> Zelena oznaka. Prikazuje se koliko je godina prošlo od rođenja osobe.
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-sm">✝</span>
-              <strong>Godišnjica smrti:</strong> Siva oznaka. Označava datum smrti i broj godina od preminuća.
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-sm">💍</span>
-              <strong>Vjenčanja / Godišnjice braka:</strong> Plava ili ljubičasta oznaka. Prikazuje vjenčanje i ime supružnika.
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-sm">📅</span>
-              <strong>Ostali događaji:</strong> Narančasta oznaka. Pokriva događaje poput krštenja, pokopa ili drugih unesenih zabilješki.
-            </li>
-          </ul>
+        {/* GODIŠNJICE BRAKA */}
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+          <button 
+            onClick={() => toggleSection('anniversaries')}
+            className="w-full flex items-center justify-between p-6 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <span className="text-3xl">💍</span>
+              <div className="text-left">
+                <h3 className="font-black text-xl text-slate-800 uppercase tracking-wide">Godišnjice braka</h3>
+                <p className="text-sm text-slate-400 font-bold">{anniversaries.length} parova</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div 
+                onClick={(e) => downloadCSV(e, 'marriage')}
+                className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors cursor-pointer text-sm font-bold"
+              >
+                <FileSpreadsheet size={16} /> Excel
+              </div>
+              {expandedSections.anniversaries ? <ChevronDown className="text-slate-400" /> : <ChevronRight className="text-slate-400" />}
+            </div>
+          </button>
+          
+          {expandedSections.anniversaries && anniversaries.length > 0 && (
+            <div className="px-6 pb-6 pt-2 bg-slate-50 border-t border-slate-100 space-y-2">
+              {anniversaries.map((a, i) => (
+                <div key={a.id + i} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <div className="font-bold text-slate-800">{a.husbandName} & {a.wifeName}</div>
+                    <div className="text-sm text-slate-500 mt-0.5">
+                      {a.place ? `u mjestu ${a.place.split(',')[0]} · ` : ''}{a.yearsAgo ? `prije ${a.yearsAgo} god.` : ''}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-teal-600 font-bold">Vjenčani {a.year || '?'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {expandedSections.anniversaries && anniversaries.length === 0 && (
+            <div className="px-6 pb-6 text-center text-slate-400 text-sm italic border-t border-slate-100 pt-6">Nema zabilježenih vjenčanja na ovaj datum.</div>
+          )}
         </div>
-      </HelpModal>
+
+      </div>
+
+      {/* FOOTER */}
+      <div className="text-center mt-12 mb-4">
+        <p className="text-xs font-semibold text-slate-400 max-w-xl mx-auto leading-relaxed">
+          Prikazuju se samo događaji s potpunim danom, mjesecom i godinom u vašem GEDCOM-u. Približni datumi (ABT, BEF, AFT) su isključeni iz ove kalkulacije kako bi se osigurala točnost "Na današnji dan" funkcije.
+        </p>
+      </div>
+      
     </div>
   );
 }

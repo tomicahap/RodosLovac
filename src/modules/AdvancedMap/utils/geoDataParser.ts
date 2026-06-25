@@ -1,56 +1,49 @@
 import type { GedcomTree, GeoTreeFeature, MigrationFlowFeature } from '../../../parser/gedcomTypes';
 import { TreeGraph } from '../../../parser/treeGraph';
 import { batchGeocode } from '../../../utils/geocoder';
+import { extractPersonEvents, getBestBirthLikeEvent, getBestDeathLikeEvent, PersonGeoEvent } from './mapEventUtils';
+
+export type PlotType = 'BIRTH' | 'DEATH' | 'MOVES';
 
 export async function generateGeoData(
   tree: GedcomTree,
   graph: TreeGraph,
   rootPersonId: string,
+  plotType: PlotType,
+  maxGenerations: number,
   onProgress?: (progress: number) => void
-): Promise<{ features: GeoTreeFeature[], flows: MigrationFlowFeature[] }> {
+): Promise<{ features: GeoTreeFeature[], flows: MigrationFlowFeature[], stats: { locationsCount: number, peopleCount: number } }> {
   
-  const ancestors = graph.getAncestors(rootPersonId, 20);
+  const ancestors = graph.getAncestors(rootPersonId, maxGenerations);
+  // Always include root person as gen 0
   ancestors.push({ personId: rootPersonId, generation: 0, ahnentafelNumber: 1 });
   
   const placesToGeocode = new Set<string>();
-  const rawEvents: Array<{
-    personId: string;
-    fullName: string;
-    type: 'BIRT' | 'DEAT' | 'MARR' | 'OTHER';
-    year?: number;
-    place?: string;
-    branch?: 'Paternal' | 'Maternal' | 'Both';
-  }> = [];
+  const allParsedEvents: PersonGeoEvent[] = [];
 
   for (const a of ancestors) {
     const p = tree.persons.get(a.personId);
     if (!p) continue;
-    
-    // Determine branch based on Ahnentafel (1 = root, 2*n = paternal, 2*n+1 = maternal)
-    let branch: 'Paternal' | 'Maternal' | 'Both' = 'Both';
-    if (a.ahnentafelNumber !== undefined) {
-      if (a.ahnentafelNumber === 1) branch = 'Both';
-      else {
-        // Find highest ancestor node
-        let temp = a.ahnentafelNumber;
-        while (temp > 3) temp = Math.floor(temp / 2);
-        branch = temp === 2 ? 'Paternal' : 'Maternal';
-      }
-    }
 
-    if (p.birth?.place) {
-      placesToGeocode.add(p.birth.place);
-      rawEvents.push({
-        personId: p.id, fullName: p.names[0]?.full || 'Nepoznato',
-        type: 'BIRT', year: p.birth?.date?.year, place: p.birth.place, branch
-      });
-    }
-    if (p.death?.place) {
-      placesToGeocode.add(p.death.place);
-      rawEvents.push({
-        personId: p.id, fullName: p.names[0]?.full || 'Nepoznato',
-        type: 'DEAT', year: p.death?.date?.year, place: p.death.place, branch
-      });
+    const events = extractPersonEvents(tree, p);
+    
+    if (plotType === 'BIRTH') {
+      const birth = getBestBirthLikeEvent(events);
+      if (birth) {
+        placesToGeocode.add(birth.place);
+        allParsedEvents.push(birth);
+      }
+    } else if (plotType === 'DEATH') {
+      const death = getBestDeathLikeEvent(events);
+      if (death) {
+        placesToGeocode.add(death.place);
+        allParsedEvents.push(death);
+      }
+    } else if (plotType === 'MOVES') {
+      for (const ev of events) {
+        placesToGeocode.add(ev.place);
+        allParsedEvents.push(ev);
+      }
     }
   }
 
@@ -61,12 +54,21 @@ export async function generateGeoData(
 
   const features: GeoTreeFeature[] = [];
   const flows: MigrationFlowFeature[] = [];
+  const uniqueLocations = new Set<string>();
+  const uniquePeople = new Set<string>();
 
   // Generate Point Features
-  for (const ev of rawEvents) {
-    if (!ev.place || !ev.year) continue;
+  for (const ev of allParsedEvents) {
+    if (!ev.place) continue;
     const geo = geoMap.get(ev.place);
     if (!geo) continue;
+
+    uniqueLocations.add(ev.place);
+    uniquePeople.add(ev.personId);
+
+    let typeStr = ev.type === 'BIRT' || ev.type === 'BAPM' ? 'Rođenje/Krštenje' 
+                : ev.type === 'DEAT' || ev.type === 'BURI' ? 'Smrt/Ukop'
+                : ev.type === 'MARR' ? 'Vjenčanje' : 'Boravište';
 
     features.push({
       type: "Feature",
@@ -75,65 +77,53 @@ export async function generateGeoData(
         personId: ev.personId,
         fullName: ev.fullName,
         eventType: ev.type,
-        year: ev.year,
-        description: `${ev.type === 'BIRT' ? 'Rođenje' : 'Smrt'} (${ev.year}): ${ev.place}`,
-        branch: ev.branch
+        year: ev.year || 0,
+        description: `${typeStr} ${ev.year ? `(${ev.year})` : ''}: ${ev.place}`,
+        place: ev.place
       }
     });
   }
 
-  // Generate Migration Flows (Child Birth -> Parent Birth)
-  // For each person, find their parents. If parent birth place != child birth place, create flow.
-  for (const a of ancestors) {
-    const p = tree.persons.get(a.personId);
-    if (!p || !p.birth?.place || !p.birth?.date?.year) continue;
-    
-    const childGeo = geoMap.get(p.birth.place);
-    if (!childGeo) continue;
-
-    const parentIds = p._parents || [];
-    for (const parentId of parentIds) {
-      const parent = tree.persons.get(parentId);
-      if (!parent || !parent.birth?.place || !parent.birth?.date?.year) continue;
+  // Generate Migration Flows for 'MOVES'
+  if (plotType === 'MOVES') {
+    for (const a of ancestors) {
+      const p = tree.persons.get(a.personId);
+      if (!p) continue;
       
-      const parentGeo = geoMap.get(parent.birth.place);
-      if (!parentGeo) continue;
-      
-      // If coordinates are identical or extremely close, skip (no migration)
-      if (Math.abs(parentGeo.lat - childGeo.lat) < 0.05 && Math.abs(parentGeo.lng - childGeo.lng) < 0.05) {
-        continue;
-      }
+      const events = extractPersonEvents(tree, p);
+      if (events.length < 2) continue; // need at least two locations to move
 
-      // Determine branch for flow
-      let branch: 'Paternal' | 'Maternal' | 'Both' = 'Both';
-      const pNode = ancestors.find(x => x.personId === parentId);
-      if (pNode?.ahnentafelNumber !== undefined) {
-        if (pNode.ahnentafelNumber === 1) branch = 'Both';
-        else {
-          let temp = pNode.ahnentafelNumber;
-          while (temp > 3) temp = Math.floor(temp / 2);
-          branch = temp === 2 ? 'Paternal' : 'Maternal';
+      for (let i = 0; i < events.length - 1; i++) {
+        const fromEv = events[i];
+        const toEv = events[i + 1];
+        
+        const fromGeo = geoMap.get(fromEv.place);
+        const toGeo = geoMap.get(toEv.place);
+
+        if (fromGeo && toGeo && (fromGeo.lat !== toGeo.lat || fromGeo.lng !== toGeo.lng)) {
+          flows.push({
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: [[fromGeo.lng, fromGeo.lat], [toGeo.lng, toGeo.lat]] },
+            properties: {
+              personId: p.id,
+              fullName: p.names[0]?.full || 'Nepoznato',
+              year: fromEv.year || 0,
+              intensity: 1,
+              fromPlace: fromEv.place,
+              toPlace: toEv.place
+            }
+          });
         }
       }
-
-      flows.push({
-        type: "Feature",
-        geometry: {
-          type: "LineString",
-          coordinates: [[parentGeo.lng, parentGeo.lat], [childGeo.lng, childGeo.lat]]
-        },
-        properties: {
-          personId: p.id,
-          fullName: `${parent.names[0]?.full} → ${p.names[0]?.full}`,
-          year: p.birth.date.year, // Flow happens roughly at child's birth
-          intensity: 1,
-          fromPlace: parent.birth.place,
-          toPlace: p.birth.place,
-          branch
-        }
-      });
     }
   }
 
-  return { features, flows };
+  return { 
+    features, 
+    flows,
+    stats: {
+      locationsCount: uniqueLocations.size,
+      peopleCount: uniquePeople.size
+    }
+  };
 }

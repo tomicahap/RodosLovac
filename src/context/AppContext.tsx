@@ -6,21 +6,12 @@ import React, { createContext, useContext, useState, useCallback, useRef } from 
 import type { GedcomTree } from '../parser/gedcomTypes';
 import { TreeGraph } from '../parser/treeGraph';
 import parseGedcom from '../parser/gedcomParser';
+import pkg from '../../package.json';
 
-export type AppModule =
-  | 'landing'
-  | 'overview'
-  | 'person-stats'
-  | 'relationships'
-  | 'lifespans'
-  | 'fan-chart'
-  | 'ancestor-map'
-  | 'surname-map'
-  | 'migration-map'
-  | 'census-map'
-  | 'on-this-day'
-  | 'research'
-  | 'export';
+export type AppModule = 
+  | 'landing' | 'overview' | 'person-stats' | 'relationships' 
+  | 'lifespans' | 'fan-chart' | 'maps' 
+  | 'on-this-day' | 'research' | 'export';
 
 export type Theme = 'dark' | 'light';
 
@@ -60,7 +51,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isLoading: false,
     loadError: null,
     fileName: null,
-    appVersion: 'v1.2.0',
+    appVersion: pkg.version,
     uploadCount: parseInt(localStorage.getItem('predci_upload_count') || '0', 10),
   });
 

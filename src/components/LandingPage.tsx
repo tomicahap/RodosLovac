@@ -13,7 +13,7 @@ function LoadingState() {
 
   React.useEffect(() => {
     const start = Date.now();
-    const duration = 9000;
+    const duration = 5000;
     
     const interval = setInterval(() => {
       const elapsed = Date.now() - start;
